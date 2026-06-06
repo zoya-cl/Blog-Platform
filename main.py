@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import json
 import uuid
 import uvicorn
@@ -12,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import config
-from topic_selection import queue_manager, title_generator, dedup_checker
+from topic_selection import queue_manager, title_generator, dedup_checker, mongo_db
 from run import run_pipeline_for_topic
 
 app = FastAPI(title="BlogGraph-AI Admin Portal", version="2.0.0")
@@ -27,28 +26,6 @@ app.mount("/output", StaticFiles(directory="output"), name="output")
 queue_manager.init_db()
 
 
-class GenerateRequest(BaseModel):
-    category: Optional[str] = None
-    title: Optional[str] = None
-
-
-class ApproveRequest(BaseModel):
-    approved: str
-
-
-class EditRequest(BaseModel):
-    title: str
-    markdown_content: str
-    metadata_json: str
-
-
-def get_db_connection():
-    conn = sqlite3.connect("topics.db", timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def bg_run_pipeline(category: str, title: str):
     """Background task to execute the full BlogGraph-AI pipeline."""
     try:
@@ -59,14 +36,7 @@ def bg_run_pipeline(category: str, title: str):
         print(f"[FastAPI Background Task] Pipeline execution failed: {e}")
         # Transition back to pending or log status so dashboard can stop spinning
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE topics SET status = 'pending', title = NULL WHERE title = ? AND status = 'in_progress'",
-                (title,)
-            )
-            conn.commit()
-            conn.close()
+            mongo_db.reset_in_progress_to_pending(title)
         except Exception as db_err:
             print(f"Error resetting database after failed task: {db_err}")
 
@@ -76,9 +46,8 @@ def health():
     """Simple health check endpoint."""
     db_ok = False
     try:
-        conn = get_db_connection()
-        conn.execute("SELECT 1")
-        conn.close()
+        from pymongo import MongoClient
+        mongo_db.get_mongo_client().admin.command('ping')
         db_ok = True
     except Exception:
         pass
@@ -93,58 +62,49 @@ def health():
 
 @app.get("/blogs")
 def get_blogs():
-    """Retrieve all blogs inside the topics table."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM topics WHERE title IS NOT NULL ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    """Retrieve all blogs inside the topics collection."""
+    blogs = mongo_db.get_all_topics()
+    # Convert MongoDB ObjectId to string for JSON serialization
+    for blog in blogs:
+        if '_id' in blog:
+            blog['_id'] = str(blog['_id'])
+    return blogs
 
 
 @app.get("/blogs/{blog_id}")
-def get_blog(blog_id: int):
-    """Retrieve a single blog by ID."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM topics WHERE id = ?", (blog_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
+def get_blog(blog_id: str):
+    """Retrieve a single blog by trace_id."""
+    blog = mongo_db.get_topic_by_trace_id(blog_id)
+    if not blog:
         raise HTTPException(status_code=404, detail="Blog not found")
-    return dict(row)
+    if '_id' in blog:
+        blog['_id'] = str(blog['_id'])
+    return blog
 
 
 @app.post("/blogs/{blog_id}/approve")
-def approve_blog(blog_id: int, payload: ApproveRequest):
+def approve_blog(blog_id: str, payload: ApproveRequest):
     """Set or toggle the approval status of a blog."""
     approved_val = payload.approved.lower()
     if approved_val not in ["yes", "no"]:
         raise HTTPException(status_code=400, detail="Approved must be 'yes' or 'no'")
         
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT metadata_json, output_filename FROM topics WHERE id = ?", (blog_id,))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
+    blog = mongo_db.get_topic_by_trace_id(blog_id)
+    if not blog:
         raise HTTPException(status_code=404, detail="Blog not found")
         
-    meta_str, output_filename = row
+    meta_str = blog.get("metadata_json")
+    output_filename = blog.get("output_filename")
     
     # 1. Update database fields
-    cursor.execute("UPDATE topics SET approved = ? WHERE id = ?", (approved_val, blog_id))
-    conn.commit()
+    mongo_db.update_topic_approval(blog_id, approved_val)
     
     # 2. Sync metadata JSON value in DB and physical sidecar file
     if meta_str:
         try:
-            meta = json.loads(meta_str)
+            meta = json.loads(meta_str) if isinstance(meta_str, str) else meta_str
             meta["approved"] = approved_val
             new_meta_str = json.dumps(meta, indent=2)
-            cursor.execute("UPDATE topics SET metadata_json = ? WHERE id = ?", (new_meta_str, blog_id))
-            conn.commit()
             
             if output_filename:
                 base_name = os.path.splitext(output_filename)[0]
@@ -155,36 +115,21 @@ def approve_blog(blog_id: int, payload: ApproveRequest):
         except Exception as e:
             print(f"Error syncing approval in metadata JSON: {e}")
             
-    conn.close()
     return {"status": "success", "id": blog_id, "approved": approved_val}
 
 
 @app.put("/blogs/{blog_id}")
-def edit_blog(blog_id: int, payload: EditRequest):
+def edit_blog(blog_id: str, payload: EditRequest):
     """Edit title, markdown content, and metadata JSON for a blog."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT output_filename FROM topics WHERE id = ?", (blog_id,))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
+    blog = mongo_db.get_topic_by_trace_id(blog_id)
+    if not blog:
         raise HTTPException(status_code=404, detail="Blog not found")
         
-    output_filename = row[0]
+    output_filename = blog.get("output_filename")
     word_count = len(payload.markdown_content.split())
     
-    # Update DB
-    cursor.execute(
-        """
-        UPDATE topics
-        SET title = ?, markdown_content = ?, metadata_json = ?, word_count = ?
-        WHERE id = ?
-        """,
-        (payload.title, payload.markdown_content, payload.metadata_json, word_count, blog_id)
-    )
-    conn.commit()
-    conn.close()
+    # Update MongoDB
+    mongo_db.update_topic(blog_id, payload.title, payload.markdown_content, payload.metadata_json)
     
     # Sync with physical files on disk
     if output_filename:
@@ -198,7 +143,7 @@ def edit_blog(blog_id: int, payload: EditRequest):
                 mf.write(payload.markdown_content)
                 
             # Write updated JSON
-            meta = json.loads(payload.metadata_json)
+            meta = json.loads(payload.metadata_json) if isinstance(payload.metadata_json, str) else payload.metadata_json
             with open(json_path, "w", encoding="utf-8") as jf:
                 json.dump(meta, jf, indent=2)
         except Exception as e:
@@ -211,16 +156,13 @@ def edit_blog(blog_id: int, payload: EditRequest):
 def generate_blog(payload: GenerateRequest, background_tasks: BackgroundTasks):
     """Trigger the BlogGraph-AI pipeline in a background task."""
     # Check if there is already an active run in progress
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title FROM topics WHERE status = 'in_progress'")
-    active_row = cursor.fetchone()
-    conn.close()
+    blogs = mongo_db.get_all_topics()
+    active_blogs = [b for b in blogs if b.get("status") == "in_progress"]
     
-    if active_row:
+    if active_blogs:
         raise HTTPException(
             status_code=400,
-            detail=f"Another generation task is currently running: '{active_row['title']}'"
+            detail=f"Another generation task is currently running: '{active_blogs[0].get('title')}'"
         )
         
     category = payload.category
@@ -1226,7 +1168,7 @@ def get_dashboard():
         function renderBlogsTable() {{
             const tbody = document.getElementById('blogs-table-body');
             if (blogsList.length === 0) {{
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No blogs found. Seed the SQLite queue to begin!</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No blogs found. Start a generation to begin!</td></tr>`;
                 return;
             }}
             

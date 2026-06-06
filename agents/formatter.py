@@ -937,8 +937,8 @@ def format_post(state: dict) -> dict:
         mf.write(full_markdown)
     print(f"Final markdown blog post saved successfully to: {md_filepath}")
     
-    # Step 6: Mark Topic Queue as Published in SQLite DB with Markdown and JSON metadata
-    print(f"Marking topic as published in SQLite DB with filename: {md_filename}")
+    # Step 6: Mark Topic Queue as Published in MongoDB with Markdown and JSON metadata
+    print(f"Marking topic as published in MongoDB with filename: {md_filename}")
     queue_manager.mark_published(
         trace_id=trace_id,
         filename=md_filename,
