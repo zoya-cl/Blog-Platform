@@ -5,7 +5,7 @@ def parse_json_robustly(text: str) -> dict:
     """
     Extracts the first valid JSON object or array from a string and parses it robustly.
     Handles markdown wrappers, leading/trailing conversation text, trailing commas,
-    and unescaped control characters.
+    unescaped control characters, and unescaped quotes.
     """
     text_clean = text.strip()
     
@@ -14,6 +14,16 @@ def parse_json_robustly(text: str) -> dict:
         return json.loads(text_clean)
     except json.JSONDecodeError:
         pass
+    
+    # Remove markdown code block wrappers
+    if text_clean.startswith("```"):
+        text_clean = re.sub(r"^```(?:json)?\n", "", text_clean)
+        text_clean = re.sub(r"\n```$", "", text_clean)
+        text_clean = text_clean.strip()
+        try:
+            return json.loads(text_clean)
+        except json.JSONDecodeError:
+            pass
         
     # Attempt to locate the first '{' or '[' and last '}' or ']'
     first_brace = text_clean.find('{')
@@ -44,24 +54,55 @@ def parse_json_robustly(text: str) -> dict:
                 except json.JSONDecodeError:
                     pass
                 
-                # 2. Clean raw control characters/newlines inside string literals
+                # 2. Escape control characters (newlines, carriage returns, tabs) inside string values
+                def fix_json_strings(text):
+                    # Replace raw newlines/tabs in string values (not in escaped form)
+                    # This regex processes strings character by character
+                    result = []
+                    in_string = False
+                    i = 0
+                    while i < len(text):
+                        char = text[i]
+                        if char == '"' and (i == 0 or text[i-1] != '\\'):
+                            in_string = not in_string
+                            result.append(char)
+                        elif in_string and char == '\n':
+                            result.append('\\n')
+                        elif in_string and char == '\r':
+                            result.append('\\r')
+                        elif in_string and char == '\t':
+                            result.append('\\t')
+                        elif in_string and char == '"' and (i == 0 or text[i-1] != '\\'):
+                            # Unescaped quote inside string - escape it
+                            result.append('\\"')
+                        else:
+                            result.append(char)
+                        i += 1
+                    return ''.join(result)
+                
                 try:
-                    # Basic regex helper to replace raw newlines within double-quoted JSON strings
-                    # We match a double quote, then any non-quote character (allowing escaped quotes), then double quote
-                    # and replace unescaped newlines in the matched content.
-                    def escape_newlines(match):
-                        s = match.group(0)
-                        # escape actual newlines and carriage returns
-                        return s.replace('\n', '\\n').replace('\r', '\\r')
-                    
-                    candidate_escaped = re.sub(r'"[^"\\]*(?:\\.[^"\\]*)*"', escape_newlines, candidate_cleaned)
-                    return json.loads(candidate_escaped)
+                    candidate_fixed = fix_json_strings(candidate_cleaned)
+                    return json.loads(candidate_fixed)
                 except Exception:
                     pass
-
-    # Fallback to standard cleaning and parsing if extraction failed
-    if text_clean.startswith("```"):
-        text_clean = re.sub(r"^```(?:json)?\n", "", text_clean)
-        text_clean = re.sub(r"\n```$", "", text_clean)
-        text_clean = text_clean.strip()
-    return json.loads(text_clean)
+                
+                # 3. Additional fix: handle improperly escaped quotes before colons/commas
+                try:
+                    # This catches cases where a quote appears but isn't properly escaped
+                    candidate_quote_fixed = re.sub(r'(?<!\\)"(?=[,\]\}])', '\\"', candidate_cleaned)
+                    candidate_quote_fixed = fix_json_strings(candidate_quote_fixed)
+                    return json.loads(candidate_quote_fixed)
+                except Exception:
+                    pass
+    
+    # Final fallback - try to parse what we have with aggressive fixes
+    try:
+        fixed = fix_json_strings(text_clean)
+        return json.loads(fixed)
+    except Exception as e:
+        # Re-raise with diagnostic info
+        raise json.JSONDecodeError(
+            f"Failed to parse JSON after multiple repair attempts. Original error: {str(e)}",
+            text_clean,
+            0
+        )

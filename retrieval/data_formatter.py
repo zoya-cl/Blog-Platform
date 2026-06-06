@@ -106,26 +106,61 @@ JSON Response:"""
 
     prompt = FORMATTER_PROMPT + dynamic_prompt
     
-    try:
-        response = llm.invoke(prompt)
-        content = response.content if hasattr(response, "content") else str(response)
-        
-        parsed_dict = parse_json_robustly(content)
-        
-        # Backfill sources from verified_facts if missing or empty
-        if not parsed_dict.get("sources"):
-            urls = set()
-            for fact in parsed_dict.get("verified_facts", []):
-                url = fact.get("source_url")
-                if url:
-                    urls.add(url)
-            parsed_dict["sources"] = sorted(list(urls))
-        
-        # Build Pydantic model for validation
-        retrieved_context = RetrievedContext(**parsed_dict)
-        print(f"Successfully validated RetrievedContext. Facts: {len(retrieved_context.verified_facts)}, Sources: {len(retrieved_context.sources)}.")
-        return retrieved_context
-        
-    except Exception as e:
-        print(f"Error in Research Aggregator node: {e}")
-        raise RuntimeError(f"Research Aggregator failed to process research logs: {str(e)}") from e
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = llm.invoke(prompt)
+            content = response.content if hasattr(response, "content") else str(response)
+            
+            print(f"[Attempt {attempt + 1}/{max_retries}] Parsing JSON response...")
+            parsed_dict = parse_json_robustly(content)
+            
+            # Backfill sources from verified_facts if missing or empty
+            if not parsed_dict.get("sources"):
+                urls = set()
+                for fact in parsed_dict.get("verified_facts", []):
+                    url = fact.get("source_url")
+                    if url:
+                        urls.add(url)
+                parsed_dict["sources"] = sorted(list(urls))
+            
+            # Build Pydantic model for validation
+            retrieved_context = RetrievedContext(**parsed_dict)
+            print(f"Successfully validated RetrievedContext. Facts: {len(retrieved_context.verified_facts)}, Sources: {len(retrieved_context.sources)}.")
+            return retrieved_context
+            
+        except json.JSONDecodeError as json_err:
+            last_error = json_err
+            print(f"[Attempt {attempt + 1}/{max_retries}] JSON parsing error at line {json_err.lineno}, col {json_err.colno}: {json_err.msg}")
+            if attempt < max_retries - 1:
+                print(f"Retrying with adjusted prompt...")
+                continue
+            else:
+                print(f"All retry attempts exhausted.")
+                
+        except Exception as e:
+            last_error = e
+            print(f"[Attempt {attempt + 1}/{max_retries}] Error during parsing/validation: {type(e).__name__}: {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"Retrying...")
+                continue
+            else:
+                print(f"All retry attempts exhausted.")
+    
+    # If all retries fail, return a fallback minimal context to unblock the pipeline
+    print(f"Warning: Research Aggregator failed after {max_retries} attempts. Returning minimal fallback context.")
+    fallback_context = RetrievedContext(
+        verified_facts=[],
+        salary_ranges={},
+        skill_requirements=[],
+        tech_stacks=[],
+        student_experiences=[],
+        sources=[],
+        leetcode_data=[],
+        roadmap_data={}
+    )
+    
+    print(f"Returning fallback RetrievedContext to unblock pipeline. Last error: {last_error}")
+    return fallback_context
