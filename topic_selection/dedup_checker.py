@@ -29,7 +29,6 @@ def is_title_unique(new_title: str, existing_titles: list, category: str = None)
     content_heavy_categories = {
         "Job Role and Career Trends",
         "Resume Writing",
-        "DSA and Coding",
         "AI-Powered Prep",
         "Company Techstack",
         "AI Technology",

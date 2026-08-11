@@ -4,131 +4,132 @@ from dotenv import load_dotenv
 # Load environmental variables from .env if present
 load_dotenv()
 
-# LLM Provider: "nim", "groq", or "ollama"
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "nim").lower()
+LLM_PROVIDER = "openrouter"
 
-# Model tier mapping per provider
 MODEL_TIERS = {
-    "nim": {
-        "small": "meta/llama-3.1-8b-instruct",
-        "medium": "meta/llama-3.1-70b-instruct",
-        "large": "meta/llama-3.3-70b-instruct",
-    },
-    "groq": {
-        "small": "llama-3.1-8b-instant",
-        "medium": "llama-3.3-70b-versatile",
-        "large": "llama-3.3-70b-versatile",
-    },
-    "ollama": {
-        "small": "llama3.1:8b",
-        "medium": "llama3.1:70b",
-        "large": "llama3.1:70b",
-    },
     "openrouter": {
-        "small": "meta-llama/llama-3.1-8b-instruct",
-        "medium": "meta-llama/llama-3.3-70b-instruct",
-        "large": "meta-llama/llama-3.3-70b-instruct",
+        "small": "mistralai/mistral-nemo",
+        "medium": "deepseek/deepseek-v4-flash",
+        "large": "meta-llama/llama-4-scout",
     }
 }
 
-# API configuration
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "") or os.getenv("NIM_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "")
 
-# Token budgets per node
-TOKEN_BUDGETS = {
-    "intake": {"input": 500, "output": 300},
-    "planner": {"input": 2000, "output": 1200},
-    "writer": {"input": 2500, "output": 700},
-    "hallucination_detector": {"input": 5000, "output": 600},
-    "quality_node": {"input": 5000, "output": 500},
-    "rewriter": {"input": 3000, "output": 700},
-    "seo_auditor": {"input": 4000, "output": 400},
-}
+QUALITY_GATE_THRESHOLD = 7.5
 
-# Quality gate settings
-QUALITY_GATE_THRESHOLD = 7.0
+BANNED_PHRASES = [
+    "In today's fast-paced world",
+    "In today's rapidly evolving",
+    "In today's competitive job market",
+    "In today's hiring landscape",
+    "At this point, you should have",
+    "By following these best practices",
+    "It's important to note that",
+    "In conclusion",
+    "Let's dive in",
+    "Without further ado",
+    "In this comprehensive guide",
+    "As we all know",
+    "It goes without saying",
+    "At the end of the day",
+    "The bottom line is",
+    "In the ever-changing landscape",
+    "Stay ahead of the curve",
+    "Take your skills to the next level",
+    "Happy coding",
+    "So what are you waiting for",
+    "It's worth noting that",
+    "In the realm of",
+    "Leveraging the power of",
+    "Unlock your potential",
+    "Game-changer",
+    "Dive deep into",
+    "Crucial role",
+    "Delve into",
+    "Testament to",
+    "Beacon of",
+    "Fostering a culture of"
+]
+QUALITY_EARLY_EXIT_THRESHOLD = 8.5
 
-# Retry caps
 RETRY_CAPS = {
     "title_dedup": 3,
-    "hallucination_rewriter": 2,
-    "quality_rewriter": 2,
-    "seo_patcher": 2,
+    "quality_rewriter": 1,
 }
 
-# Retrieval depth limits (unioned for all categories)
-RETRIEVAL_ITERATION_CAPS = {
-    "standard": 8
-}
-
-# Categories definition
 CATEGORIES = [
     "Job Role and Career Trends",
     "Resume Writing",
     "Placement Roadmaps",
-    "Interview Question Collections",
-    "DSA and Coding",
     "Comparison Articles",
     "AI Technology",
     "Developer Technology"
 ]
 
-# Base weights for each category to scale their selection probability (default is 1.0)
 BASE_WEIGHTS = {
-    "DSA and Coding": 0.2,
-    "Interview Question Collections": 0.2,
+    "Job Role and Career Trends": 1.0,
+    "Resume Writing": 1.0,
+    "Placement Roadmaps": 1.0,
+    "Comparison Articles": 1.0,
+    "AI Technology": 1.0,
+    "Developer Technology": 1.0
 }
 
-# Retrieval depth per category (all categories get standard equal retrieval depth)
-RETRIEVAL_DEPTHS = {
-    "Job Role and Career Trends": "standard",
-    "Resume Writing": "standard",
-    "Placement Roadmaps": "standard",
-    "Interview Question Collections": "standard",
-    "DSA and Coding": "standard",
-    "Comparison Articles": "standard",
-    "AI Technology": "standard",
-    "Developer Technology": "standard",
-}
-
-# Word count minimums per category
 WORD_COUNT_MINIMUMS = {
-    "Placement Roadmaps": 2200,
-    "DSA and Coding": 1800,
-    "Interview Question Collections": 1800,
     "Job Role and Career Trends": 1600,
     "Resume Writing": 1600,
-    "Comparison Articles": 1600,
-    "AI Technology": 2000,
-    "Developer Technology": 2000,
+    "Placement Roadmaps": 1800,
+    "Comparison Articles": 1800,
+    "AI Technology": 1800,
+    "Developer Technology": 1800
 }
 
-# Scraper timeout (in seconds)
-SCRAPER_TIMEOUT = 10.0
-
-# Prompt caching
-PROMPT_CACHE_ENABLED = LLM_PROVIDER in ["nim", "groq"]
-
-# Prompt versioning
 PROMPT_VERSION = 1
 
-# Seasonal weights (August through December boost)
-# Mapping month range (start_month, end_month) inclusive -> {category: multiplier}
-SEASONAL_WEIGHTS = {
-    (8, 12): {}
+BLOG_FORMATS = {
+    "deep_dive": {
+        "description": "Long-form technical analysis with prose-heavy sections",
+        "section_range": (5, 7),
+        "word_range": (2000, 2600),
+    },
+    "listicle": {
+        "description": "Numbered items with short intros — 'Top N' style",
+        "section_range": (4, 6),
+        "word_range": (1600, 2200),
+    },
+    "step_by_step": {
+        "description": "Sequential tutorial or roadmap with numbered steps",
+        "section_range": (5, 8),
+        "word_range": (2000, 2600),
+    },
+    "comparison": {
+        "description": "Side-by-side analysis with a verdict section",
+        "section_range": (4, 6),
+        "word_range": (1800, 2400),
+    },
+    "qa_interview": {
+        "description": "Question-answer pairs for interview prep",
+        "section_range": (4, 5),
+        "word_range": (1800, 2200),
+    },
+    "myth_buster": {
+        "description": "Myth vs Reality format — debunks misconceptions",
+        "section_range": (4, 6),
+        "word_range": (1600, 2000),
+    },
 }
 
-# Image Generation Pipeline Settings
-IMAGE_ENABLED = True
-IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
-IMAGE_BUDGET = {
-    "short": 3,   # < 1200 words
-    "medium": 3,  # 1200 - 2000 words
-    "long": 3     # > 2000 words
+WRITING_PERSONAS = {
+    "authoritative_expert": "Write as a seasoned industry expert. Use precise technical terminology, cite specifics, and present definitive analysis. Confident declarative tone.",
+    "helpful_mentor": "Write as a supportive senior guiding a junior. Use analogies, define jargon on first use, and add encouraging 'here's the key insight' moments.",
+    "analytical_reviewer": "Write as a neutral technical reviewer. Present both sides fairly, use data-driven comparisons, and defer to evidence over opinion.",
+    "practical_coach": "Write as a hands-on coding coach. Use directive voice ('Do X. Then Y. Avoid Z.'), include concrete steps, and focus on what to DO not just what to KNOW.",
+    "storyteller": "Write as an engaging technical narrator. Open with real-world scenarios or engineering incidents, use compelling prose, and ground concepts in practical engineering stories.",
+    "skeptical_engineer": "Write as a critical senior staff engineer. Question hype, focus on edge cases, operational overhead, failure modes, and real production trade-offs.",
+    "data_journalist": "Write as a data-focused tech analyst. Emphasize metrics, benchmarks, survey statistics, and objective quantitative comparisons."
 }
+
+

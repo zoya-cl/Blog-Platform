@@ -6,38 +6,40 @@ from agents.utils import parse_json_robustly
 
 
 
-# ---------------------------------------------------------------------------
-# SEO utility helpers (inlined from the removed agents/seo_auditor.py)
-# ---------------------------------------------------------------------------
+def count_syllables(word: str) -> int:
+    word = word.lower().strip()
+    if len(word) <= 3:
+        return 1
+    word = re.sub(r'(?:[^laeiouy]|ed|es|e)$', '', word)
+    word = re.sub(r'^y', '', word)
+    syllables = len(re.findall(r'[aeiouy]{1,2}', word))
+    return max(1, syllables)
 
-def check_keyword_in_intro(text: str, keyword: str) -> bool:
-    """Return True if *keyword* appears in the first 10 % of *text*."""
-    if not keyword or not text:
-        return False
-    intro_end = max(1, len(text) // 10)
-    intro = text[:intro_end]
-    return keyword.lower() in intro.lower()
-
-
-def get_keyword_density(text: str, keyword: str) -> float:
-    """Return keyword density as a percentage of total word count."""
-    if not keyword or not text:
-        return 0.0
-    words = text.lower().split()
-    total = len(words)
-    if total == 0:
-        return 0.0
-    kw_lower = keyword.lower()
-    # Count non-overlapping occurrences of the full keyword phrase
-    count = text.lower().count(kw_lower)
-    kw_word_count = len(kw_lower.split())
-    return (count * kw_word_count / total) * 100
+def calculate_flesch_reading_ease(text: str) -> float:
+    """Calculates Flesch Reading Ease score (0 to 100)."""
+    clean_text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    clean_text = re.sub(r'COMPONENT:.*?props:\s*\{.*?\}', '', clean_text, flags=re.DOTALL)
+    clean_text = re.sub(r'#+\s+.*', '', clean_text)
+    
+    sentences = [s for s in re.split(r'[.!?]+', clean_text) if s.strip()]
+    words = [w for w in re.findall(r'\b[a-zA-Z]+\b', clean_text) if w.strip()]
+    
+    if not sentences or not words:
+        return 60.0
+        
+    num_sentences = len(sentences)
+    num_words = len(words)
+    num_syllables = sum(count_syllables(w) for w in words)
+    
+    score = 206.835 - 1.015 * (num_words / num_sentences) - 84.6 * (num_syllables / num_words)
+    return max(0.0, min(100.0, round(score, 2)))
 
 
 QUALITY_SYSTEM_PROMPT = """You are a professional content auditor. Your job is to grade the quality of a technical blog post on a scale of 0.0 to 10.0 based on specific criteria.
 
 Here are the criteria and weightings you must use:
 1. Readability (Weight: 15%): Evaluate clarity, sentence structure, and style.
+   - Consider the calculated Flesch Reading Ease score provided in the prompt.
    - Do NOT penalize technical terminology, acronyms, or proper names themselves.
    - Penalize heavily if the text has excessive hedging (e.g., repeating words like "may", "can", "often", "typically", "generally" across multiple sentences, making the writing feel unconfident).
 2. Section Diversity & Structure (Weight: 15%): Ensure headings are informative, sections are balanced, and visual elements (tables, code blocks) are used appropriately.
@@ -93,7 +95,6 @@ def quality_node(state: dict) -> dict:
     secondary_keywords = metadata.get("secondary_keywords", [])
     
     if not focus_keyword:
-        # Fallback to seo_context focus keyword if metadata focus keyword is missing
         focus_keyword = state.get("seo_context", {}).get("primary_keyword", "")
         metadata["focus_keyword"] = focus_keyword
         
@@ -107,67 +108,36 @@ def quality_node(state: dict) -> dict:
             }
         }
         
-    # Python-based Deterministic SEO checks
-
+    # Calculate quantitative readability metric
+    readability_score = calculate_flesch_reading_ease(assembled_draft)
+    print(f"Calculated Flesch Reading Ease score: {readability_score}/100")
+        
+    # Python-based Deterministic Structural checks
     seo_warnings = []
     
-    # 1. Focus keyword in introduction
-    passed_intro = check_keyword_in_intro(assembled_draft, focus_keyword)
-    if not passed_intro:
-        seo_warnings.append(f"Focus keyword '{focus_keyword}' not found in the introduction (first 10% of text).")
-        
-    # 2. Keyword density checks dynamically based on focus keyword length
-    density = get_keyword_density(assembled_draft, focus_keyword)
-    num_words = len(focus_keyword.split())
-    if num_words <= 2:
-        min_density, max_density = 1.0, 2.5
-    elif num_words == 3:
-        min_density, max_density = 0.5, 1.8
-    else:
-        min_density, max_density = 0.3, 1.2
-        
-    passed_density = min_density <= density <= max_density
-    if not passed_density:
-        seo_warnings.append(f"Focus keyword density is {density:.2f}% (target: {min_density}% - {max_density}% for a {num_words}-word focus keyword).")
-        
-    # 3. Heading presence checks
+    # 1. Heading presence checks
     h2s = re.findall(r"^##\s+(.+)$", assembled_draft, re.MULTILINE)
     passed_headings = len(h2s) > 0
     if not passed_headings:
         seo_warnings.append("No H2 headings found in the blog post.")
         
-    # 4. FAQ presence checks
-    has_faq = any("faq" in h.lower() or "frequently asked questions" in h.lower() for h in h2s)
-    if not has_faq:
-        seo_warnings.append("No FAQ section found (H2 heading containing 'FAQ' or 'Frequently Asked Questions').")
-        
-    # 5. Meta description checks
-    meta_desc = metadata.get("meta_description", "")
-    passed_meta_len = len(meta_desc) <= 160
-    if not passed_meta_len:
-        seo_warnings.append(f"Meta description is too long ({len(meta_desc)} characters, max 160).")
-        
-    passed_meta_kw = focus_keyword.lower() in meta_desc.lower()
-    if not passed_meta_kw:
-        seo_warnings.append(f"Focus keyword '{focus_keyword}' not found in meta description.")
-        
-    # Check for FAQ placeholders
+    # 2. Check for FAQ placeholders
     has_faq_placeholders = "Answer to be populated" in assembled_draft or "*Answer to be populated" in assembled_draft
     if has_faq_placeholders:
         seo_warnings.append("FAQ placeholders found in the blog body. Answers must be populated.")
         
-    # 6. Word Count minimum check
+    # 3. Word Count minimum check
     category = state.get("category", "")
-    min_word_count = config.WORD_COUNT_MINIMUMS.get(category, 1600)
+    min_word_count = getattr(config, "WORD_COUNT_MINIMUMS", {}).get(category, 1600)
     actual_word_count = len(assembled_draft.split())
     if actual_word_count < min_word_count:
         seo_warnings.append(f"Total word count is {actual_word_count} words, which falls below the required minimum of {min_word_count} words for the '{category}' category.")
         
-    # Format deterministic SEO audit warnings for the LLM
+    # Format deterministic audit warnings for the LLM
     if seo_warnings:
         seo_warnings_str = "\n".join([f"- {w}" for w in seo_warnings])
     else:
-        seo_warnings_str = "- All deterministic SEO and length checks passed successfully!"
+        seo_warnings_str = "- All deterministic structure and length checks passed successfully!"
         
     # LLM qualitative evaluation (Medium model)
     llm = get_llm("medium", temperature=0.0)
@@ -176,8 +146,9 @@ def quality_node(state: dict) -> dict:
 ---
 Focus Keyword: {focus_keyword}
 Secondary Keywords: {", ".join(secondary_keywords)}
+Calculated Flesch Reading Ease Score: {readability_score} / 100 (60-70 is standard, 70-80 easy to read)
 
-Deterministic SEO Audit Warnings:
+Deterministic Audit Warnings:
 {seo_warnings_str}
 
 Blog Draft Content:
@@ -212,19 +183,19 @@ Output Quality Report JSON:"""
         }
         
     except Exception as e:
-        print(f"Error in Quality Grader node: {e}. Passing default pass score.")
+        print(f"Error in Quality Grader node: {e}. Falling back to retry score.")
         metadata["seo_warnings"] = seo_warnings
         return {
             "quality_scores": {
-                "overall_score": 7.5,
+                "overall_score": 5.0,
                 "dimensions": {
-                    "readability": 7.5,
-                    "section_diversity": 7.5,
-                    "repetition_padding": 7.5,
-                    "content_depth": 7.5,
-                    "coherence": 7.5,
-                    "actionability": 7.5,
-                    "evidence_and_confidence": 7.5
+                    "readability": 5.0,
+                    "section_diversity": 5.0,
+                    "repetition_padding": 5.0,
+                    "content_depth": 5.0,
+                    "coherence": 5.0,
+                    "actionability": 5.0,
+                    "evidence_and_confidence": 5.0
                 },
                 "feedback": {
                     "strengths": "Default grader strengths fallback",
@@ -235,4 +206,83 @@ Output Quality Report JSON:"""
             "seo_warnings": seo_warnings,
             "metadata": metadata
         }
+
+
+QUALITY_REWRITE_SYSTEM_PROMPT = """You are an elite technical writer and editor. Your task is to revise a blog draft to resolve quality or SEO issues identified by our grading system.
+
+You must apply these strict rules:
+1. TARGETED CORRECTION ONLY: Modify ONLY the specific sections or aspects of the blog draft directly responsible for failing grader checks. Do NOT rewrite passing sections.
+2. EXPANSION BOUNDS: If you must expand sections, do NOT invent facts or benchmarks. Expand using existing section context or facts.
+3. COMPONENT PROTECTION: Do NOT modify, delete, or remove structured `COMPONENT:` blocks.
+4. ELIMINATE REPETITION: Clean circular logic or repetitive phrasing flagged by the grader.
+5. WORD COUNT ENFORCEMENT: Preserve the overall length of the draft.
+
+Return ONLY the final revised markdown text of the blog."""
+
+def clean_llm_markdown(text: str) -> str:
+    clean = text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:markdown|text)?\n", "", clean)
+        clean = re.sub(r"\n```$", "", clean)
+        clean = clean.strip()
+    return clean
+
+def quality_rewriter(state: dict) -> dict:
+    """
+    LangGraph node that rewrites or improves the blog post based on quality grading feedback.
+    """
+    print("\n--- Running Node: Quality Rewriter ---")
+    assembled_draft = state.get("assembled_draft", "")
+    quality_scores = state.get("quality_scores", {})
+    section_briefs = state.get("section_briefs", [])
+    retrieved_ctx = state.get("retrieved_context", {})
+    verified_facts = retrieved_ctx.get("verified_facts", [])
+    word_count_target = state.get("word_count_target", 2000)
+    revision_count = state.get("quality_revision_count", 0) + 1
+    
+    llm = get_llm("large", temperature=0.7)
+    
+    dynamic_prompt = f"""
+---
+Target Word Count: {word_count_target} words
+Quality Grader Feedback:
+{json.dumps(quality_scores, indent=2)}
+
+Original Section Outline:
+{json.dumps(section_briefs, indent=2)}
+
+Verified Grounding Facts List:
+{json.dumps(verified_facts, indent=2)}
+
+Current Blog Draft:
+{assembled_draft}
+
+Revised Blog Draft Markdown:"""
+
+    prompt = QUALITY_REWRITE_SYSTEM_PROMPT + dynamic_prompt
+    
+    try:
+        response = llm.invoke(prompt)
+        content = response.content if hasattr(response, "content") else str(response)
+        revised_draft = clean_llm_markdown(content)
+        
+        orig_count = len(assembled_draft.split())
+        new_count = len(revised_draft.split())
+        if orig_count > 0 and new_count < int(orig_count * 0.95):
+            print(f"Warning: Quality rewrite reduced word count from {orig_count} to {new_count} (dropped > 5%). Preserving original draft.")
+            return {
+                "quality_revision_count": revision_count
+            }
+            
+        print(f"Quality rewrite iteration {revision_count} completed. Word count: {new_count}.")
+        return {
+            "assembled_draft": revised_draft,
+            "quality_revision_count": revision_count
+        }
+    except Exception as e:
+        print(f"Error in Quality Rewriter: {e}. Keeping original draft.")
+        return {
+            "quality_revision_count": revision_count
+        }
+
 

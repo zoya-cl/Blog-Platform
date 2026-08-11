@@ -46,28 +46,6 @@ EXAMPLE_TITLE_PATTERNS = {
         "Complete QA and Automation Testing Roadmap",
         "Ultimate Internship Preparation Guide: Timeline, DSA, and Projects"
     ],
-    "Interview Question Collections": [
-        "Top DBMS & SQL Interview Questions for Freshers",
-        "Most Asked OOPs Interview Questions with Answers",
-        "Top HR Interview Questions Every Tech Student Must Prepare",
-        "React & JavaScript Interview Questions for Frontend Roles",
-        "Linux Commands and Shell Scripting Interview Questions",
-        "Essential Computer Networks & Security Questions for SRE Roles",
-        "SQL Interview Questions Asked in Service Companies",
-        "Top Behavioral Interview Questions for Placements",
-        "iOS Developer Interview Questions (Swift & UIKit)",
-        "Core Java and Collections Framework Questions for Interviews"
-    ],
-    "DSA and Coding": [
-        "Top 50 Arrays Questions for SDE Preparation",
-        "Dynamic Programming for Interviews — Beginner to Advanced",
-        "Blind 75 LeetCode Questions — Complete Beginner Guide",
-        "30-Day Competitive Coding Preparation Plan",
-        "TCS NQT Aptitude Pattern Explained with Examples",
-        "Graph and Tree Algorithms in Python and Java",
-        "C++ STL vs Java Collections for Interview Coding",
-        "Top Sorting & Searching Algorithms Explained with Code"
-    ],
     "Comparison Articles": [
         "SDE vs DevOps vs Data Analyst — Which Tech Role to Pick?",
         "Service Companies vs Product Companies — What Should You Choose?",
@@ -145,26 +123,16 @@ def get_next_category() -> tuple:
     # Get the last selected ID for each category
     last_selected = mongo_db.get_last_selected_categories()
     
-    current_month = datetime.now().month
+    
     weights = {}
     
     for category in config.CATEGORIES:
         # Base weight
-        weight = getattr(config, "BASE_WEIGHTS", {}).get(category, 1.0)
-        
-        # Apply seasonal boosts if active
-        for month_range, boosts in config.SEASONAL_WEIGHTS.items():
-            if month_range[0] <= current_month <= month_range[1]:
-                if category in boosts:
-                    weight *= boosts[category]
+        weight = config.BASE_WEIGHTS.get(category, 1.0)
                     
-        # Apply starvation/aging boost:
-        # D = number of rows created since this category was last selected.
-        # If never selected, runs_since is equal to max_id (so its weight continues to age).
+        # Starvation/aging boost: increases weight by 20% for every run this category was skipped
         last_id = last_selected.get(category, 0)
         runs_since = max_id - last_id
-        
-        # Starvation age multiplier: increases category weight by 20% for every run it has been skipped
         age_multiplier = 1.0 + (runs_since * 0.2)
         weight *= age_multiplier
         
@@ -202,7 +170,26 @@ def mark_published(trace_id: str, filename: str, score: float, word_count: int, 
 def get_recent_titles(category: str, months: int = 3) -> list:
     """
     Fetches titles for a specific category from the past few months
-    that are published or in progress, to prevent duplicate topic generations
-    while ignoring older or unrelated topics.
+    from MongoDB and local /output files to prevent duplicate topic generation.
     """
-    return mongo_db.get_recent_titles(category, months)
+    titles = set(mongo_db.get_recent_titles(category, months))
+    
+    try:
+        import glob
+        _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_dir = os.path.join(_project_root, "output")
+        json_files = glob.glob(os.path.join(output_dir, "*.json"))
+        for jf in json_files:
+            if jf.endswith("-trace.json") or "module_" in jf:
+                continue
+            try:
+                with open(jf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("category") == category and data.get("title"):
+                        titles.add(data["title"])
+            except Exception:
+                pass
+    except Exception:
+        pass
+        
+    return list(titles)

@@ -29,9 +29,9 @@ def get_mongo_client():
             _client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
             # Verify connection
             _client.admin.command('ping')
-            print(f"✓ Connected to MongoDB at {MONGODB_URI}")
+            print(f"[OK] Connected to MongoDB at {MONGODB_URI}")
         except (ServerSelectionTimeoutError, ConnectionFailure) as e:
-            print(f"✗ Failed to connect to MongoDB: {e}")
+            print(f"[ERROR] Failed to connect to MongoDB: {e}")
             raise
     return _client
 
@@ -52,7 +52,7 @@ def close_connection():
         _client.close()
         _client = None
         _db = None
-        print("✓ MongoDB connection closed")
+        print("[OK] MongoDB connection closed")
 
 
 def init_db():
@@ -71,7 +71,7 @@ def init_db():
         collection.create_index("created_at")
         collection.create_index([("category", 1), ("status", 1)])
         
-        print(f"✓ MongoDB collection '{MONGODB_COLLECTION_TOPICS}' initialized with indexes")
+        print(f"[OK] MongoDB collection '{MONGODB_COLLECTION_TOPICS}' initialized with indexes")
         
         # Check if we have seeded categories. If not, seed one record per category.
         count = collection.count_documents({})
@@ -80,6 +80,7 @@ def init_db():
             now_str = datetime.now().isoformat()
             docs_to_insert = []
             for category in config.CATEGORIES:
+                # Omit 'trace_id' field entirely so sparse unique index ignores pending seed documents
                 docs_to_insert.append({
                     "category": category,
                     "title": None,
@@ -87,7 +88,6 @@ def init_db():
                     "output_filename": None,
                     "quality_score": None,
                     "word_count": None,
-                    "trace_id": None,
                     "created_at": now_str,
                     "completed_at": None,
                     "markdown_content": None,
@@ -95,10 +95,10 @@ def init_db():
                     "approved": "no"
                 })
             collection.insert_many(docs_to_insert)
-            print(f"✓ Seeded {len(docs_to_insert)} initial category records")
+            print(f"[OK] Seeded {len(docs_to_insert)} initial category records")
             
     except Exception as e:
-        print(f"✗ Error initializing MongoDB: {e}")
+        print(f"[ERROR] Error initializing MongoDB: {e}")
         raise
 
 
@@ -187,25 +187,78 @@ def mark_published(trace_id: str, filename: str, score: float, word_count: int,
                    markdown_content: str = None, metadata_json: str = None):
     """
     Mark the in-progress topic record matching trace_id as published.
+    If no in-progress record matches trace_id, upserts/inserts a published record directly.
     """
     try:
+        import json
+        import uuid
         db = get_db()
         collection = db[MONGODB_COLLECTION_TOPICS]
         now_str = datetime.now().isoformat()
         
-        collection.update_one(
-            {"trace_id": trace_id, "status": "in_progress"},
-            {"$set": {
+        meta = {}
+        if metadata_json:
+            try:
+                meta = json.loads(metadata_json)
+            except Exception:
+                pass
+                
+        title = meta.get("title")
+        category = meta.get("category", "Uncategorized")
+        
+        # Try updating matching trace_id first
+        res = None
+        if trace_id:
+            res = collection.update_one(
+                {"trace_id": trace_id},
+                {"$set": {
+                    "status": "published",
+                    "output_filename": filename,
+                    "quality_score": score,
+                    "word_count": word_count,
+                    "completed_at": now_str,
+                    "markdown_content": markdown_content,
+                    "metadata_json": metadata_json
+                }}
+            )
+            
+        # If no trace_id match, try updating by matching title
+        if (not res or res.matched_count == 0) and title:
+            res = collection.update_one(
+                {"title": title},
+                {"$set": {
+                    "trace_id": trace_id or str(uuid.uuid4()),
+                    "status": "published",
+                    "output_filename": filename,
+                    "quality_score": score,
+                    "word_count": word_count,
+                    "completed_at": now_str,
+                    "markdown_content": markdown_content,
+                    "metadata_json": metadata_json
+                }}
+            )
+            
+        # If still no document matched, insert new published document directly
+        if not res or res.matched_count == 0:
+            doc = {
+                "trace_id": trace_id or str(uuid.uuid4()),
+                "category": category,
+                "title": title or filename.replace(".md", "").replace("-", " ").title(),
                 "status": "published",
                 "output_filename": filename,
                 "quality_score": score,
                 "word_count": word_count,
+                "created_at": now_str,
                 "completed_at": now_str,
                 "markdown_content": markdown_content,
-                "metadata_json": metadata_json
-            }}
-        )
-        
+                "metadata_json": metadata_json,
+                "approved": "no"
+            }
+            collection.insert_one(doc)
+            print(f"[OK] Inserted new published document to MongoDB: '{doc['title']}'")
+        else:
+            print(f"[OK] Updated published document in MongoDB (trace_id: {trace_id})")
+            
     except Exception as e:
         print(f"✗ Error marking document published: {e}")
         raise
@@ -316,11 +369,15 @@ def reset_in_progress_to_pending(title: str):
         
         collection.update_one(
             {"title": title, "status": "in_progress"},
-            {"$set": {
-                "status": "pending",
-                "title": None,
-                "trace_id": None
-            }}
+            {
+                "$set": {
+                    "status": "pending",
+                    "title": None
+                },
+                "$unset": {
+                    "trace_id": ""
+                }
+            }
         )
         
     except Exception as e:
