@@ -57,6 +57,49 @@ def strip_banned_phrases(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     return text
 
+def insert_image_blocks(text: str, generated_images: list) -> str:
+    """
+    Inserts IMAGE: blocks into markdown after designated sections.
+    IMAGE:
+    src: /images/{slug}/section-{index}.webp
+    alt: Descriptive alt text
+    """
+    section_images = [img for img in generated_images if img.get("type") == "section_image"]
+    if not section_images:
+        return text
+
+    img_by_section = {}
+    for img in section_images:
+        sec_num = img.get("after_section", 1)
+        if sec_num not in img_by_section:
+            img_by_section[sec_num] = []
+        path = img.get("path", "")
+        src = path if path.startswith("/") else f"/{path}"
+        alt = img.get("alt_text", "Technical blog illustration")
+        block = f"\n\nIMAGE:\nsrc: {src}\nalt: {alt}\n"
+        img_by_section[sec_num].append(block)
+
+    pattern = re.compile(r'(?m)(?=^##\s+)')
+    sections = pattern.split(text)
+
+    assembled_sections = []
+    sec_counter = 0
+
+    for part in sections:
+        if not part.strip():
+            continue
+        if part.strip().startswith("##"):
+            sec_counter += 1
+            content = part.rstrip()
+            if sec_counter in img_by_section:
+                for img_block in img_by_section[sec_counter]:
+                    content += img_block
+            assembled_sections.append(content)
+        else:
+            assembled_sections.append(part.rstrip())
+
+    return "\n\n".join(assembled_sections).strip()
+
 def format_post(state: dict) -> dict:
     """
     Post-processing function:
@@ -90,6 +133,16 @@ def format_post(state: dict) -> dict:
     processed_blog = convert_callouts(final_blog)
     processed_blog = clean_fact_citations(processed_blog)
     processed_blog = strip_banned_phrases(processed_blog)
+
+    # Step 2.5: Insert IMAGE: blocks and stage thumbnail
+    generated_images = state.get("generated_images", [])
+    processed_blog = insert_image_blocks(processed_blog, generated_images)
+
+    thumbnail_items = [img for img in generated_images if img.get("type") == "thumbnail"]
+    if thumbnail_items:
+        t_path = thumbnail_items[0].get("path", "")
+        metadata["thumbnail"] = t_path if t_path.startswith("/") else f"/{t_path}"
+        metadata["thumbnail_prompt"] = thumbnail_items[0].get("prompt", "")
     
     # Step 3: File System Setup
     _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -134,6 +187,9 @@ def format_post(state: dict) -> dict:
         "quality_score": quality_score,
         "revision_count": revision_count,
         "prompt_version": int(metadata.get("prompt_version", config.PROMPT_VERSION)),
+        "thumbnail": metadata.get("thumbnail", ""),
+        "thumbnail_prompt": metadata.get("thumbnail_prompt", ""),
+        "image_count": len([img for img in generated_images if img.get("type") == "section_image"]),
         "approved": "no"
     }
     

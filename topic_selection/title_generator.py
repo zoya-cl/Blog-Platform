@@ -96,26 +96,36 @@ def generate_blog_title(category: str, example_patterns: list, existing_titles: 
         ))
     ])
     
-    llm = get_llm(tier="small", temperature=0.7)
-    chain = prompt | llm
-    
-    response = chain.invoke({
-        "category": category,
-        "target_style": selected_style,
-        "patterns": patterns_str,
-        "year": current_year,
-        "existing_titles": existing_str,
-        "rejected_titles": rejected_str
-    })
-    
-    title = response.content.strip()
-    
-    # Strip markdown bold formatting (**), quotes, and backticks
-    title = title.strip("*'\"`").strip()
-    if title.startswith('"') and title.endswith('"'):
-        title = title[1:-1].strip()
-    if title.startswith("'") and title.endswith("'"):
-        title = title[1:-1].strip()
-    title = title.strip("*'\"`").strip()
+    try:
+        llm = get_llm(tier="small", temperature=0.7)
+        chain = prompt | llm
         
-    return title
+        response = chain.invoke({
+            "category": category,
+            "target_style": selected_style,
+            "patterns": patterns_str,
+            "year": current_year,
+            "existing_titles": existing_str,
+            "rejected_titles": rejected_str
+        })
+        
+        title = response.content.strip()
+        
+        # Strip markdown bold formatting (**), quotes, and backticks
+        title = title.strip("*'\"`").strip()
+        if title.startswith('"') and title.endswith('"'):
+            title = title[1:-1].strip()
+        if title.startswith("'") and title.endswith("'"):
+            title = title[1:-1].strip()
+        title = title.strip("*'\"`").strip()
+            
+        return title
+    except Exception as e:
+        print(f"Warning: Title generator LLM timed out or failed ({e}). Falling back to pattern generation.")
+        if example_patterns:
+            chosen = random.choice(example_patterns)
+            try:
+                return chosen.format(year=current_year)
+            except Exception:
+                return chosen
+        return f"{category} Roadmap: Strategic Guide for {current_year}"

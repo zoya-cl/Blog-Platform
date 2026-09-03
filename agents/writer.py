@@ -194,7 +194,8 @@ async def async_write_section(
     word_count_target: int = 2000,
     writer_template: str = "standard_template",
     blog_format: str = "deep_dive",
-    persona_instructions: str = ""
+    persona_instructions: str = "",
+    global_component_plan: str = ""
 ) -> str:
     """Async helper to write a single section in parallel."""
     print(f"Async Writing Section {idx}: '{brief.get('title')}' (Target: {brief.get('target_word_count')} words)...")
@@ -231,10 +232,16 @@ Section Brief to Write:
 - Key Points to Cover: {', '.join(brief.get('key_points', []))}
 - Assigned Keywords: {', '.join(brief.get('assigned_keywords', []))}
 - Component Directives: {', '.join(brief.get('component_directives', []))}
+- Component Focus (your UNIQUE dimension): {brief.get('component_focus') or 'None — no component needed for this section'}
 - Include Table: {brief.get('include_table', False)}
 - Include Code Block: {brief.get('include_code_block', False)}
 - Maps to PAA Question: {brief.get('maps_to_paa')}
 - Is Final Section: {brief.get('is_final_section', False)}
+
+GLOBAL COMPONENT PLAN (other sections' assigned components — do NOT overlap with these):
+{global_component_plan or "No other components assigned across the blog."}
+
+CRITICAL: Your component content MUST focus EXCLUSIVELY on the dimension specified in your Component Focus above. Do NOT include metrics, rows, or data points that duplicate another section's component focus.
 
 Section Facts (Grounding Database — use ONLY these):
 {json.dumps(section_facts, indent=2) if section_facts else "None — rely on established technical knowledge only."}
@@ -284,6 +291,16 @@ async def async_write_all(state: dict) -> List[str]:
     persona_instructions = config.WRITING_PERSONAS[persona_key]
     print(f"Writing Persona selected: {persona_key}")
     
+    # Build global component plan string
+    plan_lines = []
+    for b in briefs:
+        directives = b.get("component_directives", [])
+        focus = b.get("component_focus", "")
+        if directives:
+            focus_str = f' → Focus: "{focus}"' if focus else ""
+            plan_lines.append(f"- Section {b.get('section_index')} ({b.get('title')}): {', '.join(directives)}{focus_str}")
+    global_component_plan = "\n".join(plan_lines) if plan_lines else "None"
+
     llm = get_llm("large", temperature=0.7)
     
     tasks = [
@@ -297,7 +314,8 @@ async def async_write_all(state: dict) -> List[str]:
             word_count_target,
             writer_template_name,
             blog_format,
-            persona_instructions
+            persona_instructions,
+            global_component_plan
         ) for i, brief in enumerate(briefs, 1)
     ]
     return await asyncio.gather(*tasks)

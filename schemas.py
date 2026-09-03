@@ -43,6 +43,7 @@ class SectionBrief(BaseModel):
     include_table: bool = False
     include_code_block: bool = False
     component_directives: List[str] = Field(default_factory=list)
+    component_focus: Optional[str] = Field(None, description="Unique focus area for this section's component — must not overlap with other sections")
     maps_to_paa: Optional[str] = Field(None)
     is_final_section: bool = False
 
@@ -104,3 +105,4 @@ class BlogState(TypedDict):
     final_blog: str
     metadata: Dict[str, Any]
     prompt_version: int
+    generated_images: List[Dict[str, Any]]

@@ -30,6 +30,18 @@ RULES:
    - For 'myth_buster', title format MUST be "Myth: [Common Belief]".
    - For 'listicle', titles should be numbered items.
    - For 'step_by_step', titles should be sequential steps/milestones.
+6. COMPONENT BUDGET: The TOTAL number of interactive components across ALL sections must follow these strict limits:
+   - comparison_widget: MAX 2 per blog. One for high-level overview, one for deep technical comparison.
+   - table: MAX 2 per blog. One for data/statistics, one for decision criteria.
+   - quiz: MAX 3 per blog. Space them evenly. Always include 1 quiz in the final section.
+   - code_block: MAX 2 per blog. Only for Developer Technology or System Architecture categories.
+   - roadmap: MAX 1 per blog. Only for career path or step-by-step guide categories.
+   - Total components across entire blog: 6-8 maximum.
+   - NOT every section needs a component. Sections focused on prose explanation should have empty component_directives.
+7. COMPONENT FOCUS: When assigning a component_directive to a section, you MUST also provide a "component_focus" string that describes the SPECIFIC, UNIQUE dimension that component should cover. No two sections may share the same component_focus. Examples:
+   - Section 1 component_focus: "Compare enterprise adoption rates and market share data"
+   - Section 3 component_focus: "Compare architectural models: flat manager/worker vs control plane/pods"
+   - Section 5 component_focus: "Quiz on migration strategy decision points" 
 
 Output JSON structure:
 {
@@ -54,6 +66,7 @@ Output JSON structure:
       "include_table": false,
       "include_code_block": false,
       "component_directives": ["comparison_widget"],
+      "component_focus": "Compare ONLY enterprise adoption rates and vendor support status",
       "maps_to_paa": null,
       "is_final_section": false
     }
@@ -126,6 +139,29 @@ Output Outline JSON:"""
             brief = SectionBrief(**sec)
             validated_briefs.append(brief.model_dump() if hasattr(brief, "model_dump") else brief.dict())
             
+        # Validate component budget & deduplicate directives
+        COMPONENT_LIMITS = {
+            "comparison_widget": 2,
+            "table": 2,
+            "quiz": 3,
+            "code_block": 2,
+            "roadmap": 1
+        }
+        comp_counts = {}
+        for brief in validated_briefs:
+            trimmed_directives = []
+            for cd in brief.get("component_directives", []):
+                count = comp_counts.get(cd, 0)
+                limit = COMPONENT_LIMITS.get(cd, 2)
+                if count < limit:
+                    comp_counts[cd] = count + 1
+                    trimmed_directives.append(cd)
+                else:
+                    print(f"[Planner Warning] {cd} count exceeded budget ({limit}). Trimming from section {brief.get('section_index')}.")
+            brief["component_directives"] = trimmed_directives
+            if not trimmed_directives:
+                brief["component_focus"] = None
+
         blog_title = parsed_dict.get("blog_title", topic)
         meta_desc = parsed_dict.get("meta_description", f"Guide on {topic}.")
         if len(meta_desc) > 160:
@@ -191,6 +227,7 @@ Output Outline JSON:"""
                 assigned_facts=[],
                 assigned_keywords=[],
                 component_directives=["quiz"] if is_last else [],
+                component_focus="Final knowledge check quiz on core concepts" if is_last else None,
                 is_final_section=is_last
             )
             fallback_briefs.append(brief.model_dump() if hasattr(brief, "model_dump") else brief.dict())

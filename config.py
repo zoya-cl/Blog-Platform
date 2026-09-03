@@ -8,7 +8,7 @@ LLM_PROVIDER = "openrouter"
 
 MODEL_TIERS = {
     "openrouter": {
-        "small": "mistralai/mistral-nemo",
+        "small": "deepseek/deepseek-v4-flash",
         "medium": "deepseek/deepseek-v4-flash",
         "large": "meta-llama/llama-4-scout",
     }
@@ -133,3 +133,10 @@ WRITING_PERSONAS = {
 }
 
 
+
+
+# Image Generation Settings
+IMAGE_API_URL = os.getenv("IMAGE_API_URL", "")  # Empty string activates stub mode
+IMAGE_API_KEY = os.getenv("IMAGE_API_KEY", "")
+IMAGE_COUNT_PER_BLOG = 3  # 2-3 section images + 1 thumbnail
+IMAGE_STYLES = ["technical_diagram", "conceptual_illustration", "data_visualization", "hero_banner"]
