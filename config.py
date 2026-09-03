@@ -29,6 +29,13 @@ BANNED_PHRASES = [
     "By following these best practices",
     "It's important to note that",
     "In conclusion",
+    "### Conclusion",
+    "## Conclusion",
+    "#### Conclusion",
+    "### In Conclusion",
+    "### Summary",
+    "### Final Thoughts",
+    "### Wrapping Up",
     "Let's dive in",
     "Without further ado",
     "In this comprehensive guide",
@@ -51,7 +58,14 @@ BANNED_PHRASES = [
     "Delve into",
     "Testament to",
     "Beacon of",
-    "Fostering a culture of"
+    "Fostering a culture of",
+    "will be discussed in the next section",
+    "will be covered in the next section",
+    "will be explored in the next section",
+    "as discussed in the previous section",
+    "as mentioned earlier",
+    "as we discussed above",
+    "as we mentioned above" 
 ]
 QUALITY_EARLY_EXIT_THRESHOLD = 8.5
 

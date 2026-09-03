@@ -123,7 +123,22 @@ def get_next_category() -> tuple:
     # Get the last selected ID for each category
     last_selected = mongo_db.get_last_selected_categories()
     
-    
+    # HARD FLOOR: If any category has NEVER been selected (0 blogs),
+    # and we've generated at least len(CATEGORIES) blogs total,
+    # force-select the most starved category.
+    if max_id >= len(config.CATEGORIES):
+        never_selected = [
+            cat for cat in config.CATEGORIES 
+            if cat not in last_selected or last_selected[cat] == 0
+        ]
+        if never_selected:
+            selected_category = never_selected[0]
+            patterns = EXAMPLE_TITLE_PATTERNS.get(selected_category, [])
+            current_year = datetime.now().year
+            processed_patterns = [p.replace("{year}", str(current_year)) for p in patterns]
+            print(f"[HARD FLOOR] Category '{selected_category}' has 0 blogs -- force-selecting.")
+            return selected_category, processed_patterns
+            
     weights = {}
     
     for category in config.CATEGORIES:
@@ -165,6 +180,56 @@ def mark_published(trace_id: str, filename: str, score: float, word_count: int, 
     Marks the in-progress topic row matching trace_id as published.
     """
     mongo_db.mark_published(trace_id, filename, score, word_count, markdown_content, metadata_json)
+
+
+def get_recent_formats(n: int = 8) -> list:
+    """Get the blog_format of the last N generated blogs from JSON sidecars."""
+    import glob
+    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(_project_root, "output")
+    
+    formats = []
+    json_files = sorted(
+        glob.glob(os.path.join(output_dir, "*.json")),
+        key=os.path.getmtime, reverse=True
+    )
+    for jf in json_files:
+        if "-trace.json" in jf or "module_" in jf:
+            continue
+        try:
+            with open(jf, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            fmt = data.get("blog_format")
+            if fmt:
+                formats.append(fmt)
+            if len(formats) >= n:
+                break
+        except Exception:
+            pass
+    return formats
+
+
+def get_all_recent_titles(months: int = 3) -> list:
+    """Fetches titles across ALL categories for cross-category dedup."""
+    titles = set(mongo_db.get_all_recent_titles(months))
+    
+    try:
+        import glob
+        _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        output_dir = os.path.join(_project_root, "output")
+        for jf in glob.glob(os.path.join(output_dir, "*.json")):
+            if jf.endswith("-trace.json") or "module_" in jf:
+                continue
+            try:
+                with open(jf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("title"):
+                        titles.add(data["title"])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return list(titles)
 
 
 def get_recent_titles(category: str, months: int = 3) -> list:

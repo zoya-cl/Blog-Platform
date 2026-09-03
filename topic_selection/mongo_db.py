@@ -264,6 +264,28 @@ def mark_published(trace_id: str, filename: str, score: float, word_count: int,
         raise
 
 
+def get_all_recent_titles(months: int = 3) -> list:
+    """
+    Fetch titles across ALL categories from the past few months.
+    Used for cross-category deduplication.
+    """
+    try:
+        db = get_db()
+        collection = db[MONGODB_COLLECTION_TOPICS]
+        from datetime import timedelta
+        cutoff_date = (datetime.now() - timedelta(days=months*30)).isoformat()
+        
+        docs = collection.find({
+            "status": {"$in": ["published", "in_progress"]},
+            "title": {"$ne": None},
+            "created_at": {"$gte": cutoff_date}
+        })
+        return [doc["title"] for doc in docs]
+    except Exception as e:
+        print(f"Error getting all recent titles: {e}")
+        return []
+
+
 def get_recent_titles(category: str, months: int = 3) -> list:
     """
     Fetch titles for a specific category from the past few months

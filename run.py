@@ -75,7 +75,8 @@ def run_auto_pipeline() -> dict:
     """Selects a category and title automatically, then runs the full pipeline."""
     queue_manager.init_db()
     category, patterns = queue_manager.get_next_category()
-    existing_titles = queue_manager.get_recent_titles(category, months=3)
+    # Pass ALL recent titles (cross-category) to prevent topic overlap
+    existing_titles = queue_manager.get_all_recent_titles(months=3)
     
     candidate_title = title_generator.generate_blog_title(category, patterns, existing_titles, [])
     print(f"Auto-selected Category: '{category}' | Title: '{candidate_title}'")

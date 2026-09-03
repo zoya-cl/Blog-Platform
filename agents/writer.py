@@ -41,6 +41,7 @@ CORE RULES:
 5. INFORMATION DENSITY: Avoid circular statements, filler transitions ("At this point...", "In today's..."), or repeating the same idea in different words. Every paragraph must introduce new technical details.
 6. TARGET LENGTH: Stay strictly within ±15% of the target word count. Do not write repetitive fluff to artificially inflate word count.
 7. COMPONENT SELECTION: Limit quiz components. Include at most ONE quiz component per section ONLY if specifically requested. Prefer comparison_widget, table, or code_block for visual engagement.
+8. SALARY & CURRENCY LOCALIZATION: When mentioning salary figures, ALWAYS provide the Indian (INR) equivalent alongside any USD figure. Use the format: "₹12–18 LPA (~$15,000–$22,000 USD)". If factual source evidence only cites USD, convert using an approximate ₹83–₹85 per USD exchange rate. For Indian-specific tech roles and placement milestones, prioritize INR figures (in Lakhs Per Annum / LPA format). For US/global data, lead with USD but include the INR conversion in parentheses.
 
 BANNED PHRASES (never use these):
 {banned_phrases}
@@ -88,12 +89,21 @@ props: {
   ...props as valid JSON...
 }
 
-- Place component blocks immediately after the paragraph that introduces them.
+- Place component blocks at a natural break point within the section.
+- Do NOT write generic preamble or intro sentences before component blocks (e.g. NEVER write "The following table shows...", "Consider the following example:", "Here is a comparison of...", or "The widget below illustrates..."). Let the technical discussion lead directly into the component.
 - Do not render identical, duplicate, or redundant component blocks within the same section.
 - Do not generate more than one component block per section under any circumstances, EXCEPT for the final section which must contain exactly three sequential quiz components.
 - Do NOT generate any COMPONENT: spec blocks unless that specific component type is explicitly listed in Component Directives (or if it's the final section quizzes).
 - Even if 'code_block' appears in Component Directives, you are PROHIBITED from generating a code_block component if the Section Type is 'conceptual', 'intro', 'comparison', 'summary', 'faq', or 'cta'. It is ONLY valid for Section Type 'tutorial' or 'roadmap'.
 - In the table component props, the 'rows' property MUST be a list of lists of strings (e.g. [["val1", "val2"]]). Do NOT write list of dicts.
+
+QUIZ QUALITY RULES:
+- Quiz questions MUST test conceptual understanding, architectural reasoning, trade-offs, or troubleshooting decisions.
+- You are strictly PROHIBITED from testing memorization of numbers, salary figures, percentages, market statistics, or dates.
+- Good Question: "Which data structure provides the optimal average time complexity for range queries on sorted data?"
+- Good Question: "What is the primary trade-off when choosing eventual consistency over strong consistency in distributed caches?"
+- BAD Question (NEVER generate): "What is the average salary of an entry-level Cloud Engineer?"
+- BAD Question (NEVER generate): "What percentage of companies use microservices?" 
 
 Examples:
 - For code_block:

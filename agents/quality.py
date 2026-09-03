@@ -225,6 +225,16 @@ def clean_llm_markdown(text: str) -> str:
         clean = re.sub(r"^```(?:markdown|text)?\n", "", clean)
         clean = re.sub(r"\n```$", "", clean)
         clean = clean.strip()
+    # Strip leaked LLM prompt artifacts and meta-text
+    LEAKED_PATTERNS = [
+        r"(?i)Revised Blog Draft Markdown:\s*$",
+        r"(?im)^Here\s+(?:is|are)\s+the\s+revised.*?:\s*$",
+        r"(?im)^Here's\s+the\s+revised.*?:\s*$",
+        r"(?im)^Below\s+is\s+the\s+revised.*?:\s*$",
+        r"---\s*$",
+    ]
+    for pat in LEAKED_PATTERNS:
+        clean = re.sub(pat, "", clean).strip()
     return clean
 
 def quality_rewriter(state: dict) -> dict:
@@ -240,7 +250,7 @@ def quality_rewriter(state: dict) -> dict:
     word_count_target = state.get("word_count_target", 2000)
     revision_count = state.get("quality_revision_count", 0) + 1
     
-    llm = get_llm("large", temperature=0.7)
+    llm = get_llm("medium", temperature=0.3)
     
     dynamic_prompt = f"""
 ---
@@ -257,7 +267,7 @@ Verified Grounding Facts List:
 Current Blog Draft:
 {assembled_draft}
 
-Revised Blog Draft Markdown:"""
+Output the complete revised blog markdown below. Do not include any preamble or meta-text:"""
 
     prompt = QUALITY_REWRITE_SYSTEM_PROMPT + dynamic_prompt
     
@@ -270,6 +280,18 @@ Revised Blog Draft Markdown:"""
         new_count = len(revised_draft.split())
         if orig_count > 0 and new_count < int(orig_count * 0.95):
             print(f"Warning: Quality rewrite reduced word count from {orig_count} to {new_count} (dropped > 5%). Preserving original draft.")
+            return {
+                "quality_revision_count": revision_count
+            }
+
+        # Structural validation: ensure rewrite didn't drop H2 headings or COMPONENT blocks
+        orig_h2_count = len(re.findall(r"^##\s+", assembled_draft, re.MULTILINE))
+        new_h2_count = len(re.findall(r"^##\s+", revised_draft, re.MULTILINE))
+        orig_component_count = len(re.findall(r"COMPONENT:", assembled_draft))
+        new_component_count = len(re.findall(r"COMPONENT:", revised_draft))
+
+        if new_h2_count < orig_h2_count or new_component_count < orig_component_count:
+            print(f"Warning: Quality rewrite lost structural elements (H2s: {orig_h2_count}->{new_h2_count}, Components: {orig_component_count}->{new_component_count}). Preserving original draft.")
             return {
                 "quality_revision_count": revision_count
             }

@@ -42,6 +42,8 @@ RULES:
    - Section 1 component_focus: "Compare enterprise adoption rates and market share data"
    - Section 3 component_focus: "Compare architectural models: flat manager/worker vs control plane/pods"
    - Section 5 component_focus: "Quiz on migration strategy decision points" 
+8. AUDIENCE LOCALE & CONTEXT: The primary audience is Indian engineering students, freshers, and early-career developers preparing for tech placements and career transitions. Section plans, salary references, and milestones should prioritize India-relevant context (Indian tech companies, Tier-1/2/3 campus placement dynamics, CTC/LPA salary brackets) alongside global engineering standards.
+9. FORMAT DIVERSITY: If the dynamic prompt contains a FORMAT RESTRICTION indicating certain formats are overused, you MUST NOT select any of those restricted formats. Choose the next best-fitting format (e.g. 'deep_dive', 'comparison', 'step_by_step', 'listicle') instead.
 
 Output JSON structure:
 {
@@ -105,11 +107,28 @@ def planner_node(state: dict) -> dict:
     
     selected_arc = random.choice(NARRATIVE_ARCS)
     
+    # Query recent format distribution to enforce diversity
+    format_restriction = ""
+    try:
+        from topic_selection import queue_manager
+        recent_formats = queue_manager.get_recent_formats(8)
+        format_counts = {}
+        for fmt in recent_formats:
+            format_counts[fmt] = format_counts.get(fmt, 0) + 1
+        # If any format was used 3 or more times in the last 8 runs, restrict it
+        overused = [f for f, count in format_counts.items() if count >= 3]
+        if overused:
+            format_restriction = f"FORMAT RESTRICTION: Do NOT use these overrepresented formats: {', '.join(overused)}. Pick a DIFFERENT format (e.g. deep_dive, comparison, step_by_step, listicle) to ensure format diversity.\n"
+            print(f"[FORMAT GUARD] Active restriction on overused formats: {overused}")
+    except Exception as e:
+        print(f"Warning: Could not check recent formats ({e})")
+    
     dynamic_prompt = f"""
 ---
 Target Blog Title: {topic}
 Blog Category: {category}
 Target Narrative Arc: {selected_arc}
+{format_restriction}
 
 SEO Context:
 {json.dumps(seo_context, indent=2)}

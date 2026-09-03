@@ -218,6 +218,27 @@ def generate_image_prompts(title: str, category: str, section_drafts: list) -> d
             ]
         }
 
+def enforce_h2_headings(draft_parts: list, section_briefs: list) -> list:
+    """Ensure every section draft starts with a proper ## heading."""
+    fixed = []
+    for i, part in enumerate(draft_parts):
+        stripped = part.strip()
+        if not stripped:
+            fixed.append(part)
+            continue
+        # Check if starts with ##
+        if not re.match(r"^##\s+", stripped):
+            first_line = stripped.split("\n")[0].strip()
+            # If the first line doesn't end with a period and is reasonably short, assume it was intended as a heading
+            if len(first_line) < 120 and not first_line.endswith("."):
+                rest = stripped[len(first_line):].lstrip("\n")
+                stripped = f"## {first_line}\n\n{rest}" if rest else f"## {first_line}"
+            elif i < len(section_briefs):
+                title = section_briefs[i].get("title", f"Section {i+1}")
+                stripped = f"## {title}\n\n{stripped}"
+        fixed.append(stripped)
+    return fixed
+
 def assembler(state: dict) -> dict:
     """
     Stitches all section drafts in outline order,
@@ -234,6 +255,9 @@ def assembler(state: dict) -> dict:
         print("Warning: No section drafts found to assemble.")
         return {"assembled_draft": ""}
         
+    section_briefs = state.get("section_briefs", [])
+    drafts = enforce_h2_headings(drafts, section_briefs)
+    
     assembled_parts = []
     
     # 1. Stitch all section drafts sequentially

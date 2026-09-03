@@ -1,3 +1,4 @@
+import re
 import random
 from datetime import datetime
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,6 +14,25 @@ TITLE_STYLES = [
     "Market & Hiring Outlook: Frame as an analytical breakdown of hiring standards and salary trends (e.g., 'AI Engineer Hiring Bar in {year}: What Top Tech Firms Require').",
     "Strategic Decision Guide: Frame as a decision-making framework (e.g., 'When to Use SQL vs NoSQL in SDE System Design Interviews')."
 ]
+
+OVERUSED_PATTERNS = [
+    r"\d+-\w+\s+blueprint",
+    r"\d+-stage\s+",
+    r"\d+-step\s+",
+    r"the\s+ultimate\s+guide",
+    r"the\s+complete\s+guide",
+    r"everything\s+you\s+need\s+to\s+know",
+]
+
+def is_structurally_repetitive(title: str, existing_titles: list) -> bool:
+    """Check if the title matches an overused structural pattern already present in existing titles."""
+    title_lower = title.lower()
+    for pattern in OVERUSED_PATTERNS:
+        if re.search(pattern, title_lower):
+            for existing in existing_titles:
+                if re.search(pattern, existing.lower()):
+                    return True
+    return False
 
 def generate_blog_title(category: str, example_patterns: list, existing_titles: list = None, rejected_titles: list = None) -> str:
     """
@@ -30,7 +50,7 @@ def generate_blog_title(category: str, example_patterns: list, existing_titles: 
     # Format existing titles if any
     existing_str = ""
     if existing_titles:
-        existing_str = "EXISTING TITLES IN DATABASE (DO NOT GENERATE THESE OR COVERS OF THESE SAME TOPICS/TECH):\n" + "\n".join([f"- {t}" for t in existing_titles]) + "\n\n"
+        existing_str = "EXISTING TITLES IN DATABASE (DO NOT generate titles about the same core subject, technology, or theme as ANY of these -- even with different phrasing, angle, or framing):\n" + "\n".join([f"- {t}" for t in existing_titles]) + "\n\n"
         
     # Format rejected titles if any
     rejected_str = ""

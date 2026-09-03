@@ -57,6 +57,80 @@ def strip_banned_phrases(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     return text
 
+BANNED_HEADINGS = [
+    r"^#{2,4}\s+Conclusion\s*$",
+    r"^#{2,4}\s+In Conclusion\s*$", 
+    r"^#{2,4}\s+Summary\s*$",
+    r"^#{2,4}\s+Final Thoughts\s*$",
+    r"^#{2,4}\s+Wrapping Up\s*$",
+]
+
+def strip_banned_headings(text: str) -> str:
+    """Removes banned heading lines entirely from the markdown."""
+    for pat in BANNED_HEADINGS:
+        text = re.sub(pat, "", text, flags=re.MULTILINE | re.IGNORECASE)
+    return text
+
+def strip_component_preamble(text: str) -> str:
+    """Remove generic preamble sentences before COMPONENT: blocks."""
+    patterns = [
+        r"(?:The following|Here is a|Consider the following|Below is a|The table below)[^\n]*\n\s*\n(?=COMPONENT:)",
+        r"(?:This comparison|The following comparison)[^\n]*\n\s*\n(?=COMPONENT:)",
+        r"(?:To understand|To see|To compare|To illustrate)[^\n]*(?:consider|compare|see|look at)[^\n]*\n\s*\n(?=COMPONENT:)",
+        r"(?:Test your knowledge|Test your understanding)[^\n]*(?:with|below|using)[^\n]*\n?\s*(?=COMPONENT:)",
+    ]
+    for pat in patterns:
+        text = re.sub(pat, "", text, flags=re.IGNORECASE)
+    return text
+
+def detect_truncated_text(text: str) -> list:
+    """
+    Detect sentences that appear truncated (ending with dangling articles, prepositions, or
+    internal mid-sentence missing noun phrases like 'play a in').
+    Returns list of warning strings for logging.
+    """
+    warnings = []
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        if not stripped or stripped.startswith('#') or stripped.startswith('COMPONENT:'):
+            continue
+        dangling_patterns = [
+            # Line ends with dangling article/preposition/conjunction
+            r'\b(a|an|the|and|or|but|in|on|at|to|for|with|by|of|from|is|are|was|were|can|will)\s*$',
+            # Mid-sentence truncated phrase: e.g. "play a in landing", "takes a to", "is a for"
+            r'\b(a|an|the)\s+(in|on|at|to|for|with|by|of|from)\b'
+        ]
+        for pat in dangling_patterns:
+            if re.search(pat, stripped, re.IGNORECASE):
+                warnings.append(f"[TRUNCATED] Line {i+1}: '{stripped[-60:]}'")
+                break
+    return warnings
+
+def dedup_reference_links(text: str) -> str:
+    """Remove duplicate markdown links pointing to the same URL, keeping the first occurrence."""
+    from urllib.parse import urlparse
+    seen_urls = set()
+    
+    def normalize_url(url):
+        parsed = urlparse(url)
+        return (parsed.netloc + parsed.path).rstrip('/')
+    
+    def replacer(match):
+        label = match.group(1)
+        url = match.group(2)
+        # Skip local/internal image links
+        if url.startswith('/images/') or url.startswith('images/'):
+            return match.group(0)
+        norm = normalize_url(url)
+        if norm in seen_urls:
+            # Keep just the label text without the duplicate link
+            return label
+        seen_urls.add(norm)
+        return match.group(0)
+    
+    return re.sub(r'\[([^\]]+)\]\(([^)]+)\)', replacer, text)
+
 def insert_image_blocks(text: str, generated_images: list) -> str:
     """
     Inserts IMAGE: blocks into markdown after designated sections.
@@ -100,6 +174,57 @@ def insert_image_blocks(text: str, generated_images: list) -> str:
 
     return "\n\n".join(assembled_sections).strip()
 
+EXCHANGE_RATE = 83.0  # INR per USD
+
+def validate_currency_conversions(text: str) -> str:
+    """
+    Find INR amounts with USD conversions in parentheses and validate the math.
+    Corrects miscalculated parentheticals (e.g. ₹2.9Cr being calculated as ~$35,000 USD).
+    """
+    def lpa_to_usd(lpa_val):
+        return (lpa_val * 100000) / EXCHANGE_RATE
+    
+    def cr_to_usd(cr_val):
+        return (cr_val * 10000000) / EXCHANGE_RATE
+    
+    def format_usd(usd_val):
+        if usd_val >= 1000000:
+            return f"${usd_val/1000000:.1f}M"
+        elif usd_val >= 1000:
+            return f"${usd_val/1000:,.0f}K"
+        return f"${usd_val:,.0f}"
+    
+    # Pattern: ₹X-Y LPA (~$A-$B USD)
+    def fix_lpa_range(match):
+        low_lpa = float(match.group(1))
+        high_lpa = float(match.group(2))
+        low_usd = lpa_to_usd(low_lpa)
+        high_usd = lpa_to_usd(high_lpa)
+        return f"₹{match.group(1)}–{match.group(2)} LPA (~{format_usd(low_usd)}–{format_usd(high_usd)} USD)"
+    
+    # Pattern: ₹X.YCr-₹A.BCr+ (~$C-$D USD)
+    def fix_cr_range(match):
+        low_cr = float(match.group(1))
+        high_cr = float(match.group(2))
+        low_usd = cr_to_usd(low_cr)
+        high_usd = cr_to_usd(high_cr)
+        plus = match.group(3) or ""
+        return f"₹{match.group(1)}Cr–₹{match.group(2)}Cr{plus} (~{format_usd(low_usd)}–{format_usd(high_usd)} USD)"
+    
+    # Fix ₹X-Y LPA (~$wrong USD) patterns
+    text = re.sub(
+        r'[₹?]([\d.]+)[–\-]([\d.]+)\s*LPA\s*\((?:~\s*)?\$?[\d,KkMm.]+[–\-]\$?[\d,KkMm.]+\s*USD\)',
+        fix_lpa_range, text, flags=re.IGNORECASE
+    )
+    
+    # Fix ₹X.YCr-₹A.BCr+ (~$wrong USD) patterns
+    text = re.sub(
+        r'[₹?]([\d.]+)\s*Cr[–\-][₹?]?([\d.]+)\s*Cr(\+)?\s*\((?:~\s*)?\$?[\d,KkMm.]+[–\-]\$?[\d,KkMm.]+\s*USD\)',
+        fix_cr_range, text, flags=re.IGNORECASE
+    )
+    
+    return text
+
 def format_post(state: dict) -> dict:
     """
     Post-processing function:
@@ -124,7 +249,7 @@ def format_post(state: dict) -> dict:
         print("Error: No blog post text found in state to format.")
         return state
 
-    # Step 1: Calculate Word Count & Reading Time
+    # Step 1: Initialize Word Count & Reading Time
     word_count = len(final_blog.split())
     reading_time_minutes = math.ceil(word_count / 200)
     metadata["word_count"] = word_count
@@ -132,7 +257,13 @@ def format_post(state: dict) -> dict:
     # Step 2: Clean Citations, Callouts, and Banned Phrases
     processed_blog = convert_callouts(final_blog)
     processed_blog = clean_fact_citations(processed_blog)
+    processed_blog = dedup_reference_links(processed_blog)
     processed_blog = strip_banned_phrases(processed_blog)
+    processed_blog = strip_banned_headings(processed_blog)
+    processed_blog = strip_component_preamble(processed_blog)
+    processed_blog = validate_currency_conversions(processed_blog)
+    # Safety net: strip any leftover rewriter artifact
+    processed_blog = re.sub(r"(?i)Revised Blog Draft Markdown:\s*$", "", processed_blog).strip()
 
     # Step 2.5: Insert IMAGE: blocks and stage thumbnail
     generated_images = state.get("generated_images", [])
@@ -144,6 +275,14 @@ def format_post(state: dict) -> dict:
         metadata["thumbnail"] = t_path if t_path.startswith("/") else f"/{t_path}"
         metadata["thumbnail_prompt"] = thumbnail_items[0].get("prompt", "")
     
+    # Step 2.8: Truncation Detection
+    truncation_warnings = detect_truncated_text(processed_blog)
+    if truncation_warnings:
+        print(f"WARNING: {len(truncation_warnings)} potentially truncated sentences detected:")
+        for tw in truncation_warnings:
+            print(f"  {tw}")
+        metadata["truncation_warnings"] = truncation_warnings
+
     # Step 3: File System Setup
     _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     output_dir = os.path.join(_project_root, "output")
@@ -166,7 +305,12 @@ def format_post(state: dict) -> dict:
         md_filepath = os.path.join(output_dir, md_filename)
         json_filepath = os.path.join(output_dir, json_filename)
         
-    # Step 4: Construct and Write Metadata JSON sidecar
+    # Step 4: Recalculate Word Count on Cleaned Blog and Write Metadata
+    word_count = len(processed_blog.split())
+    reading_time_minutes = math.ceil(word_count / 200)
+    metadata["word_count"] = word_count
+    metadata["reading_time_minutes"] = reading_time_minutes
+    # Construct and Write Metadata JSON sidecar
     quality_score = float(metadata.get("quality_score", 0.0))
     revision_count = int(metadata.get("revision_count", 0))
     
@@ -175,6 +319,7 @@ def format_post(state: dict) -> dict:
         "slug": metadata.get("slug", base_name),
         "date": metadata.get("date", ""),
         "category": category,
+        "blog_format": state.get("blog_format", "deep_dive"),
         "audience_level": state.get("audience_level", "fresher"),
         "tags": metadata.get("tags", []),
         "meta_description": metadata.get("meta_description", ""),
