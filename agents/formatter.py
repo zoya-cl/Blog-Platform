@@ -338,11 +338,10 @@ def format_post(state: dict) -> dict:
         "approved": "no"
     }
     
-    with open(json_filepath, "w", encoding="utf-8") as jf:
-        json.dump(json_data, jf, indent=2)
-    print(f"Sidecar metadata saved: {json_filepath}")
+    # Local file writing disabled (MongoDB is single source of truth)
+    # with open(json_filepath, "w", encoding="utf-8") as jf:
+    #     json.dump(json_data, jf, indent=2)
     
-    # Step 5: Write Markdown File
     header_line = (
         f"**Category:** {category} | "
         f"**Date:** {json_data['date']} | "
@@ -350,12 +349,9 @@ def format_post(state: dict) -> dict:
         f"**Reading Time:** {reading_time_minutes} min | "
         f"**Score:** {quality_score:.1f}/10"
     )
-    
     full_markdown = f"# {json_data['title']}\n\n{header_line}\n---\n\n{processed_blog}"
-    
-    with open(md_filepath, "w", encoding="utf-8") as mf:
-        mf.write(full_markdown)
-    print(f"Final markdown blog saved: {md_filepath}")
+    # with open(md_filepath, "w", encoding="utf-8") as mf:
+    #     mf.write(full_markdown)
     
     # Step 6: Save to MongoDB
     queue_manager.mark_published(

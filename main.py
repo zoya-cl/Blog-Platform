@@ -112,6 +112,58 @@ def find_files_by_slug(slug: str):
             
     return None, None
 
+
+def sections_to_markdown(sections: list) -> str:
+    """
+    Reconstructs rich markdown content from Fulcrum structured sections,
+    emitting COMPONENT: and IMAGE: blocks so BlogRenderer mounts full interactive React widgets.
+    """
+    if not sections:
+        return ""
+    md_parts = []
+    for sec in sections:
+        heading = sec.get("heading")
+        if heading:
+            md_parts.append(f"## {heading}\n")
+        body = sec.get("body", [])
+        for block in body:
+            btype = block.get("type")
+            if btype == "paragraph":
+                text = block.get("text", "")
+                if text:
+                    md_parts.append(text + "\n")
+            elif btype == "heading":
+                level = "#" * block.get("level", 3)
+                md_parts.append(f"{level} {block.get('text', '')}\n")
+            elif btype == "quiz":
+                props_json = json.dumps(block)
+                md_parts.append(f"\n\nCOMPONENT:\nType: quiz\nProps: {props_json}\n\n")
+            elif btype == "comparison_widget":
+                props_json = json.dumps(block)
+                md_parts.append(f"\n\nCOMPONENT:\nType: comparison_widget\nProps: {props_json}\n\n")
+            elif btype in ["table", "data_table"]:
+                props_json = json.dumps(block)
+                md_parts.append(f"\n\nCOMPONENT:\nType: table\nProps: {props_json}\n\n")
+            elif btype == "code_block":
+                props_json = json.dumps(block)
+                md_parts.append(f"\n\nCOMPONENT:\nType: code_block\nProps: {props_json}\n\n")
+            elif btype == "roadmap":
+                props_json = json.dumps(block)
+                md_parts.append(f"\n\nCOMPONENT:\nType: roadmap\nProps: {props_json}\n\n")
+            elif btype == "image":
+                src = block.get("src") or block.get("url") or ""
+                alt = block.get("alt") or block.get("caption") or "Blog Illustration"
+                if src:
+                    md_parts.append(f"\n\nIMAGE:\nsrc: {src}\nalt: {alt}\n\n")
+            elif btype == "callout":
+                text = block.get("text", "")
+                md_parts.append(f"> {text}\n")
+            elif btype == "list":
+                for item in block.get("items", []):
+                    md_parts.append(f"- {item}")
+                md_parts.append("")
+    return "\n\n".join(md_parts)
+
 def find_mongo_doc_by_slug(collection, slug: str):
     """Robustly retrieves a MongoDB document matching slug, filename, title, or topic."""
     cursor = list(collection.find({}))
@@ -182,11 +234,12 @@ def list_blogs(
     skip: int = Query(0, ge=0)
 ):
     """
-    List all blog topics from MongoDB and local filesystem with computed slugs.
+    List blogs directly from MongoDB 'blogs' collection as the single source of truth.
+    Local file scanning is disabled to ensure exact database parity without duplicates.
     """
     try:
         db = mongo_db.get_db()
-        collection = db[mongo_db.MONGODB_COLLECTION_TOPICS]
+        collection = db["blogs"]
         
         query = {}
         if category:
@@ -196,57 +249,28 @@ def list_blogs(
         if approved:
             query["approved"] = approved
             
-        mongo_docs = list(collection.find(query).skip(skip).limit(limit))
+        mongo_docs = list(collection.find(query).sort("created_at", -1).skip(skip).limit(limit))
         
         processed_blogs = []
-        seen_slugs = set()
-
         for doc in mongo_docs:
             if "_id" in doc:
                 doc["_id"] = str(doc["_id"])
 
-            out_fn = doc.get("output_filename") or ""
-            computed_slug = (
-                doc.get("slug")
-                or (out_fn.replace(".md", "") if out_fn else None)
-                or slugify(doc.get("title") or "")
-                or slugify(doc.get("topic") or "")
-            )
-            if not computed_slug:
+            slug = doc.get("slug") or slugify(doc.get("title") or "")
+            if not slug:
                 continue
                 
-            doc["slug"] = computed_slug
-            if not doc.get("title"):
-                doc["title"] = doc.get("topic") or computed_slug
-            seen_slugs.add(computed_slug)
+            doc["slug"] = slug
+            doc["output_filename"] = f"{slug}.md"
+            doc["approved"] = doc.get("approved", "no")
+            doc["quality_score"] = float(doc.get("quality_score") or 0.0)
+            doc["word_count"] = int(doc.get("word_count") or 0)
+            doc["created_at"] = doc.get("created_at") or doc.get("date") or ""
+            doc["category"] = doc.get("category", "General")
             processed_blogs.append(doc)
-            
-        # Also discover local /output files that may not be in MongoDB yet
-        out_dir = get_output_dir()
-        for jf in glob.glob(os.path.join(out_dir, "*.json")):
-            if jf.endswith("-trace.json") or "module_" in jf:
-                continue
-            try:
-                with open(jf, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                    file_slug = meta.get("slug") or slugify(meta.get("title") or "")
-                    if file_slug and file_slug not in seen_slugs:
-                        seen_slugs.add(file_slug)
-                        processed_blogs.append({
-                            "title": meta.get("title") or file_slug,
-                            "slug": file_slug,
-                            "category": meta.get("category", "General"),
-                            "status": "published",
-                            "approved": meta.get("approved", "no"),
-                            "quality_score": meta.get("quality_score", 0.0),
-                            "word_count": meta.get("word_count", 0),
-                            "output_filename": f"{file_slug}.md"
-                        })
-            except Exception:
-                pass
-                
+
         return {
-            "total": len(processed_blogs),
+            "total": collection.count_documents(query),
             "skip": skip,
             "limit": limit,
             "blogs": processed_blogs
@@ -257,52 +281,75 @@ def list_blogs(
 @app.get("/api/blogs/{slug}")
 def get_blog(slug: str):
     """
-    Fetch a single blog's full markdown content and metadata sidecar.
+    Fetch a single blog directly from MongoDB 'blogs' collection.
+    Falls back gracefully to 'topics' or local files if necessary.
     """
+    db = mongo_db.get_db()
+    
+    # 1. Look up in 'blogs' collection
+    doc = db["blogs"].find_one({"slug": slug})
+    if not doc:
+        # Try matching by title slug regex
+        doc = db["blogs"].find_one({"title": {"$regex": f"^{re.escape(slug)}", "$options": "i"}})
+        
+    # 2. Fallback to topics collection
+    if not doc:
+        topics_col = db[mongo_db.MONGODB_COLLECTION_TOPICS]
+        doc = find_mongo_doc_by_slug(topics_col, slug)
+
     md_path, json_path = find_files_by_slug(slug)
     
-    db_doc = None
-    try:
-        db = mongo_db.get_db()
-        collection = db[mongo_db.MONGODB_COLLECTION_TOPICS]
-        db_doc = find_mongo_doc_by_slug(collection, slug)
-    except Exception:
-        pass
-        
+    if not doc and not md_path:
+        raise HTTPException(status_code=404, detail=f"Blog with slug '{slug}' not found.")
+
+    if doc and "_id" in doc:
+        doc["_id"] = str(doc["_id"])
+
     markdown_content = ""
     metadata = {}
-    
-    if md_path and os.path.exists(md_path):
-        with open(md_path, "r", encoding="utf-8") as f:
-            markdown_content = f.read()
+
+    if doc:
+        markdown_content = doc.get("markdown_content") or ""
+        if not markdown_content and doc.get("sections"):
+            markdown_content = sections_to_markdown(doc.get("sections", []))
             
-    if json_path and os.path.exists(json_path):
-        with open(json_path, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-            
-    if not markdown_content and db_doc:
-        markdown_content = db_doc.get("markdown_content", "")
-        if db_doc.get("metadata_json"):
-            try:
-                metadata = json.loads(db_doc["metadata_json"])
-            except Exception:
-                pass
-                
-    if not markdown_content and not db_doc:
-        raise HTTPException(status_code=404, detail=f"Blog with slug '{slug}' not found.")
+        for k, v in doc.items():
+            if k != "_id":
+                metadata[k] = v
+        metadata["blog_format"] = doc
         
-    final_title = metadata.get("title") or (db_doc.get("title") if db_doc else slug)
-    final_category = metadata.get("category") or (db_doc.get("category") if db_doc else "")
-    final_approved = metadata.get("approved") or (db_doc.get("approved") if db_doc else "no")
-    
+    if md_path and os.path.exists(md_path) and not markdown_content:
+        try:
+            with open(md_path, "r", encoding="utf-8") as f:
+                markdown_content = f.read()
+        except Exception:
+            pass
+
+    if json_path and os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                file_meta = json.load(f)
+                for k, v in file_meta.items():
+                    if k not in metadata:
+                        metadata[k] = v
+        except Exception:
+            pass
+
+    final_title = (doc.get("title") if doc else None) or metadata.get("title") or slug
+    final_category = (doc.get("category") if doc else None) or metadata.get("category") or "General"
+    final_approved = (doc.get("approved") if doc else None) or metadata.get("approved") or "no"
+    final_status = (doc.get("status") if doc else None) or "published"
+    final_score = float((doc.get("quality_score") if doc else None) or metadata.get("quality_score") or 0.0)
+    final_word_count = int((doc.get("word_count") if doc else None) or metadata.get("word_count") or 0)
+
     return {
         "slug": slug,
         "title": final_title,
         "category": final_category,
         "approved": final_approved,
-        "status": db_doc.get("status", "published") if db_doc else "published",
-        "quality_score": metadata.get("quality_score", db_doc.get("quality_score", 0.0) if db_doc else 0.0),
-        "word_count": metadata.get("word_count", db_doc.get("word_count", 0) if db_doc else 0),
+        "status": final_status,
+        "quality_score": final_score,
+        "word_count": final_word_count,
         "metadata": metadata,
         "markdown_content": markdown_content
     }
@@ -412,6 +459,12 @@ def approve_blog(slug: str, body: ApprovalRequest):
             
     try:
         db = mongo_db.get_db()
+        # Update in blogs collection
+        db["blogs"].update_one(
+            {"slug": slug},
+            {"$set": {"approved": body.approved, "updated_at": datetime.now().isoformat()}}
+        )
+        # Also update in topics collection if present
         collection = db[mongo_db.MONGODB_COLLECTION_TOPICS]
         doc = find_mongo_doc_by_slug(collection, slug)
         if doc and "_id" in doc:
@@ -484,6 +537,10 @@ def delete_blog(slug: str):
             if slug in [d_slug, d_title_slug, d_topic_slug, d_file_slug, d_id_str]:
                 del_res = collection.delete_one({"_id": d["_id"]})
                 db_deleted_count += del_res.deleted_count
+        
+        # Also delete from 'blogs' collection
+        b_del = db["blogs"].delete_many({"slug": slug})
+        db_deleted_count += b_del.deleted_count
     except Exception as e:
         print(f"[Warning] MongoDB deletion error: {e}")
         

@@ -24,6 +24,7 @@ export interface BlogMetadata {
   slug?: string;
   date?: string;
   category?: string;
+  blog_format?: string;
   audience_level?: string;
   tags?: string[];
   meta_description?: string;
@@ -39,6 +40,7 @@ export interface BlogMetadata {
   thumbnail?: string;
   thumbnail_prompt?: string;
   image_count?: number;
+  truncation_warnings?: string[];
 }
 
 export interface BlogDetail {

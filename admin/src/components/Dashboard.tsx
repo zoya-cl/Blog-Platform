@@ -1,13 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import type { BlogSummary } from '../types';
 import { fetchBlogs, approveBlog, deleteBlog } from '../api';
-import { FileText, CheckCircle2, Clock, Award, Search, Filter, Plus, Eye, Edit3, Trash2, Check, X, RefreshCw } from 'lucide-react';
+import { FileText, CheckCircle2, Clock, Award, Search, Filter, Plus, Eye, Edit3, Trash2, Check, X, RefreshCw, Calendar } from 'lucide-react';
 
 interface DashboardProps {
   onViewBlog: (slug: string) => void;
   onEditBlog: (slug: string) => void;
   onOpenGenerate: () => void;
 }
+
+
+const formatTimestamp = (ts?: string) => {
+  if (!ts) return 'N/A';
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    const hasTime = ts.includes('T') || ts.includes(':');
+    if (hasTime) {
+      return d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    }
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return ts;
+  }
+};
 
 export const Dashboard: React.FC<DashboardProps> = ({ onViewBlog, onEditBlog, onOpenGenerate }) => {
   const [blogs, setBlogs] = useState<BlogSummary[]>([]);
@@ -187,16 +213,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewBlog, onEditBlog, on
         ) : filteredBlogs.length === 0 ? (
           <div className="p-12 text-center text-slate-500 text-sm">No blogs found matching filters.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+          <div className="overflow-x-auto relative">
+            <table className="w-full text-left text-sm text-slate-300 border-collapse">
+              <thead className="bg-[#060E20] text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
                 <tr>
-                  <th className="px-6 py-4">Title</th>
-                  <th className="px-6 py-4">Category</th>
-                  <th className="px-6 py-4">Quality Score</th>
-                  <th className="px-6 py-4">Words</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-4 py-3.5 min-w-[220px]">Title</th>
+                  <th className="px-4 py-3.5 whitespace-nowrap">Category</th>
+                  <th className="px-4 py-3.5 whitespace-nowrap">Created</th>
+                  <th className="px-4 py-3.5 text-center whitespace-nowrap">Quality</th>
+                  <th className="px-4 py-3.5 text-center whitespace-nowrap">Words</th>
+                  <th className="px-4 py-3.5 text-center whitespace-nowrap">Status</th>
+                  <th className="px-4 py-3.5 text-right whitespace-nowrap sticky right-0 z-20 bg-[#060E20] border-l border-slate-800 shadow-[-12px_0_16px_rgba(0,0,0,0.6)]">Activity</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -211,37 +238,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewBlog, onEditBlog, on
                   else if (score >= 7.0) scoreBadge = "bg-amber-500/10 text-amber-400 border-amber-500/30";
 
                   return (
-                    <tr key={idx} className="hover:bg-slate-800/40 transition group">
-                      <td className="px-6 py-4 font-semibold text-slate-200 max-w-md truncate">
+                    <tr key={idx} className="hover:bg-slate-800/50 transition group">
+                      <td className="px-4 py-3.5 font-semibold text-slate-200 max-w-[280px] lg:max-w-[340px] truncate">
                         <button
                           onClick={() => onViewBlog(slug)}
-                          className="hover:text-cyan-400 text-left transition"
+                          className="hover:text-[#4AABEF] text-left transition truncate w-full block"
+                          title={title}
                         >
                           {title}
                         </button>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800/80 text-slate-300 border border-slate-700/80">
                           {blog.category || 'General'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3.5 text-xs text-slate-400 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-[#4AABEF]" />
+                          <span>{formatTimestamp(blog.created_at || (blog as any).date)}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border ${scoreBadge}`}>
                           <Award className="w-3 h-3" />
                           <span>{score > 0 ? score.toFixed(1) : 'N/A'}</span>
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-slate-400 text-xs">
+                      <td className="px-4 py-3.5 text-slate-400 text-xs text-center whitespace-nowrap">
                         {blog.word_count || 0} words
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
                         <button
                           onClick={() => handleToggleApprove(slug, blog.approved || 'no')}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm cursor-pointer ${
                             isApproved
-                              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20'
-                              : 'bg-amber-500/10 border-amber-500/40 text-amber-400 hover:bg-amber-500/20'
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25'
+                              : 'bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25'
                           }`}
+                          title={isApproved ? "Click to revoke approval" : "Click to approve blog"}
                         >
                           {isApproved ? (
                             <>
@@ -256,26 +291,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewBlog, onEditBlog, on
                           )}
                         </button>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap sticky right-0 z-20 bg-[#091124] group-hover:bg-[#101a33] border-l border-slate-800 shadow-[-12px_0_16px_rgba(0,0,0,0.6)] transition-colors">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => onViewBlog(slug)}
-                            title="View Publication"
-                            className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-cyan-600 hover:text-white transition"
+                            title="View Fulcrum Publication Preview"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4AABEF]/15 text-[#4AABEF] hover:bg-[#4AABEF] hover:text-white border border-[#4AABEF]/30 text-xs font-semibold transition-all shadow-sm cursor-pointer"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View</span>
                           </button>
                           <button
                             onClick={() => onEditBlog(slug)}
-                            title="Edit Blog"
-                            className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white transition"
+                            title="Edit Blog Markdown & Metadata"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/15 text-indigo-400 hover:bg-indigo-600 hover:text-white border border-indigo-500/30 text-xs font-semibold transition-all shadow-sm cursor-pointer"
                           >
-                            <Edit3 className="w-4 h-4" />
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Edit</span>
                           </button>
                           <button
                             onClick={() => handleDelete(slug)}
-                            title="Delete Blog"
-                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:bg-rose-600 hover:text-white transition"
+                            title="Delete Blog Permanently"
+                            className="p-1.5 rounded-lg bg-rose-500/15 text-rose-400 hover:bg-rose-600 hover:text-white border border-rose-500/30 transition-all shadow-sm cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

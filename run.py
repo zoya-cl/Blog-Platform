@@ -56,18 +56,15 @@ def run_pipeline_for_topic(category: str, title: str) -> dict:
     from agents.formatter import format_post
     final_state = format_post(final_state)
     
-    # 5. Save full trace JSON to output directory for debugging/testing
+    # 5. Local trace saving disabled (MongoDB 'blogs' collection is source of truth)
+    # Trace file saving skipped
+
+    # 6. Format for Fulcrum frontend and save to MongoDB 'blogs' collection
     try:
-        import os
-        _project_root = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(_project_root, "output")
-        slug = final_state.get("metadata", {}).get("slug", "blog-post")
-        trace_path = os.path.join(output_dir, f"{slug}-trace.json")
-        with open(trace_path, "w", encoding="utf-8") as tf:
-            json.dump(final_state, tf, indent=2)
-        print(f"Full pipeline trace artifact saved: {trace_path}")
+        from topic_selection.output_formatter import format_and_save_blog
+        format_and_save_blog(trace_data=final_state)
     except Exception as e:
-        print(f"Warning: Could not save pipeline trace file: {e}")
+        print(f"Warning: Could not format and save blog for frontend: {e}")
     
     return final_state
 
