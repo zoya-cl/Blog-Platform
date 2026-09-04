@@ -98,6 +98,93 @@ EXAMPLE_TITLE_PATTERNS = {
 }
 
 
+CATEGORY_GUIDES = {
+    "Job Role and Career Trends": {
+        "description": "Career paths, role comparisons, hiring trends, and job market realities for software engineers in India.",
+        "topic_areas": [
+            "specific tech role deep-dives (SRE, platform eng, data eng, mobile, security, etc.)",
+            "career transition strategies and fork-in-the-road decisions",
+            "hiring market realities vs expectations",
+            "salary/compensation analysis for specific roles",
+            "startup vs corporate career dynamics",
+            "remote work, freelancing, and non-traditional career paths",
+            "upskilling ROI — which skills actually move the needle"
+        ],
+        "off_limits": "generic motivational advice, 'follow your passion' content, non-tech career topics"
+    },
+    "Resume Writing": {
+        "description": "Technical resume strategy, ATS optimization, portfolio presentation, and application materials for SDE roles.",
+        "topic_areas": [
+            "ATS parsing mechanics and optimization strategies",
+            "project description writing for specific tech stacks",
+            "resume anti-patterns that get immediate rejections",
+            "portfolio/GitHub profile optimization",
+            "cover letter and cold outreach strategy",
+            "resume formatting for specific scenarios (career gap, switch, fresher)",
+            "LinkedIn optimization for tech job seekers"
+        ],
+        "off_limits": "generic resume tips, non-tech resume advice, visual design tutorials"
+    },
+    "Placement Roadmaps": {
+        "description": "Structured preparation strategies for campus placements, coding interviews, and tech hiring processes in India.",
+        "topic_areas": [
+            "DSA preparation strategies and platform comparisons",
+            "system design preparation for different experience levels",
+            "company-specific preparation (FAANG, startups, product companies)",
+            "placement timeline planning and milestone setting",
+            "mock interview strategy and behavioral prep",
+            "competitive programming vs interview prep trade-offs",
+            "tier-1/2/3 college placement dynamics and strategies"
+        ],
+        "off_limits": "generic study motivation, non-tech exam prep, GATE/GRE content"
+    },
+    "Comparison Articles": {
+        "description": "Head-to-head technical and career comparisons with clear analysis and decision frameworks.",
+        "topic_areas": [
+            "programming language comparisons for specific use cases",
+            "framework/tool comparisons (web, mobile, cloud, data)",
+            "career path comparisons with salary and growth data",
+            "architectural pattern comparisons (design decisions)",
+            "platform/service comparisons (cloud providers, databases, etc.)",
+            "development methodology comparisons",
+            "certification comparisons and ROI analysis"
+        ],
+        "off_limits": "superficial 'which is better' without analysis, comparisons with obvious winners"
+    },
+    "AI Technology": {
+        "description": "AI/ML engineering, LLM applications, model deployment, and practical AI implementation for developers.",
+        "topic_areas": [
+            "LLM application architecture (RAG, agents, chains, evaluation)",
+            "model training and fine-tuning techniques",
+            "production ML infrastructure and deployment",
+            "AI tool/framework deep-dives (LangChain, Hugging Face, etc.)",
+            "vector databases and embedding systems",
+            "prompt engineering techniques and anti-patterns",
+            "AI career paths and skill requirements",
+            "computer vision and NLP application development",
+            "responsible AI and model evaluation practices"
+        ],
+        "off_limits": "AI hype/speculation, non-technical AI news, basic 'what is AI' content"
+    },
+    "Developer Technology": {
+        "description": "Core software engineering technologies, tools, architectures, and best practices for building production systems.",
+        "topic_areas": [
+            "database internals and selection strategies",
+            "API design patterns and protocol comparisons",
+            "containerization and orchestration (Docker, K8s)",
+            "CI/CD and DevOps toolchain deep-dives",
+            "web framework internals and selection",
+            "security fundamentals for developers",
+            "version control advanced patterns",
+            "cloud services and serverless architecture",
+            "performance optimization and profiling",
+            "testing strategies and quality engineering"
+        ],
+        "off_limits": "basic tutorials, framework announcements, non-developer tools"
+    }
+}
+
+
 def init_db():
     """
     Initializes the MongoDB database and creates indexes.
@@ -113,7 +200,7 @@ def get_next_category() -> tuple:
     have not been selected recently.
     
     Returns:
-        tuple: (selected_category, list_of_example_patterns)
+        tuple: (selected_category, category_guide_dict)
     """
     init_db()  # Ensure database and seeds exist
     
@@ -124,7 +211,7 @@ def get_next_category() -> tuple:
     last_selected = mongo_db.get_last_selected_categories()
     
     # HARD FLOOR: If any category has NEVER been selected (0 blogs),
-    # and we've generated at least len(CATEGORIES) blogs total,
+    # and we've generated at least len(config.CATEGORIES) blogs total,
     # force-select the most starved category.
     if max_id >= len(config.CATEGORIES):
         never_selected = [
@@ -133,11 +220,9 @@ def get_next_category() -> tuple:
         ]
         if never_selected:
             selected_category = never_selected[0]
-            patterns = EXAMPLE_TITLE_PATTERNS.get(selected_category, [])
-            current_year = datetime.now().year
-            processed_patterns = [p.replace("{year}", str(current_year)) for p in patterns]
+            guide = CATEGORY_GUIDES.get(selected_category, {})
             print(f"[HARD FLOOR] Category '{selected_category}' has 0 blogs -- force-selecting.")
-            return selected_category, processed_patterns
+            return selected_category, guide
             
     weights = {}
     
@@ -158,13 +243,8 @@ def get_next_category() -> tuple:
     weights_list = list(weights.values())
     selected_category = random.choices(categories_list, weights=weights_list, k=1)[0]
     
-    # Fetch title patterns
-    patterns = EXAMPLE_TITLE_PATTERNS.get(selected_category, [])
-    # Replace {year} with current year
-    current_year = datetime.now().year
-    processed_patterns = [p.replace("{year}", str(current_year)) for p in patterns]
-    
-    return selected_category, processed_patterns
+    guide = CATEGORY_GUIDES.get(selected_category, {})
+    return selected_category, guide
 
 
 def mark_in_progress(trace_id: str, category: str, title: str):

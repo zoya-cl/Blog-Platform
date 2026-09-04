@@ -62,7 +62,7 @@ for i in range(1, NUM_ROUNDS + 1):
     print(f"─── Round {i}/{NUM_ROUNDS} ───")
     
     # 1. Select category
-    category, patterns = queue_manager.get_next_category()
+    category, category_guide = queue_manager.get_next_category()
     category_counts[category] += 1
     
     # 2. Generate title (real LLM call)
@@ -70,7 +70,7 @@ for i in range(1, NUM_ROUNDS + 1):
     try:
         title = title_generator.generate_blog_title(
             category=category,
-            example_patterns=patterns,
+            category_guide=category_guide,
             existing_titles=existing_titles,
             rejected_titles=[]
         )
@@ -90,6 +90,8 @@ for i in range(1, NUM_ROUNDS + 1):
         format_pattern_counts["Year tag (2026)"] += 1
     if ":" in title:
         format_pattern_counts["Colon structure"] += 1
+    if "actually" in tl:
+        format_pattern_counts["Contains 'actually'"] += 1
 
     generated.append({
         "round": i,
@@ -197,6 +199,8 @@ if format_pattern_counts.get("Colon structure", 0) / total > 0.7:
     issues.append(f"❌ Colon-split titles at {format_pattern_counts['Colon structure']}/{total} ({format_pattern_counts['Colon structure']/total*100:.0f}%)")
 if format_pattern_counts.get("Year tag (2026)", 0) / total > 0.4:
     issues.append(f"❌ '2026' in {format_pattern_counts['Year tag (2026)']}/{total} titles ({format_pattern_counts['Year tag (2026)']/total*100:.0f}%)")
+if format_pattern_counts.get("Contains 'actually'", 0) / total > 0.3:
+    issues.append(f"❌ 'Actually' overused in {format_pattern_counts["Contains 'actually'"]}/{total} titles ({format_pattern_counts["Contains 'actually'"]/total*100:.0f}%)")
 
 if not issues:
     print("  ✅ ALL CHECKS PASSED — topic selection and title diversity look healthy!")

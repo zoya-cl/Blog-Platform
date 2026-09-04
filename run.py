@@ -74,11 +74,11 @@ def run_pipeline_for_topic(category: str, title: str) -> dict:
 def run_auto_pipeline() -> dict:
     """Selects a category and title automatically, then runs the full pipeline."""
     queue_manager.init_db()
-    category, patterns = queue_manager.get_next_category()
+    category, category_guide = queue_manager.get_next_category()
     # Pass ALL recent titles (cross-category) to prevent topic overlap
     existing_titles = queue_manager.get_all_recent_titles(months=3)
     
-    candidate_title = title_generator.generate_blog_title(category, patterns, existing_titles, [])
+    candidate_title = title_generator.generate_blog_title(category, category_guide, existing_titles, [])
     print(f"Auto-selected Category: '{category}' | Title: '{candidate_title}'")
     
     return run_pipeline_for_topic(category, candidate_title)
